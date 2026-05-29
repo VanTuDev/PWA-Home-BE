@@ -24,30 +24,55 @@ import adminRoutes from './routes/adminRoutes.js';
 
 dotenv.config();
 
-// ─── CORS ───────────────────────────────────────────────────────────────────
-// Cho phép localhost (dev) + mọi subdomain *.vercel.app (production preview)
-// + domain chính đã được khai báo trong FE_ORIGIN
+// ─── CORS ────────────────────────────────────────────────────────────────────
+// FE_ORIGIN hỗ trợ nhiều domain cách nhau bằng dấu phẩy
+// VD: FE_ORIGIN=https://pwa-home.vercel.app,https://custom-domain.com
+const extraOrigins = process.env.FE_ORIGIN
+  ? process.env.FE_ORIGIN.split(',').map(o => o.trim()).filter(Boolean)
+  : [];
+
 const allowedOrigins = [
-  'http://localhost:3000',
+  // ── Local development ──
+  'http://localhost:3000',   // Vite custom port (vite --port 3000)
+  'http://localhost:5173',   // Vite default port
+  'http://localhost:5174',   // Vite fallback port
+  'http://localhost:4173',   // Vite preview
   'http://127.0.0.1:3000',
+  'http://127.0.0.1:5173',
+
+  // ── Production Vercel ──
   'https://pwa-home.vercel.app',
   'https://pwa-home-8z3e43kv4-vantudevs-projects.vercel.app',
-  ...(process.env.FE_ORIGIN ? [process.env.FE_ORIGIN] : [])
+
+  // ── Render BE (health checks, self-call) ──
+  'https://pwa-home-be.onrender.com',
+
+  // ── Extra origins từ env ──
+  ...extraOrigins
 ];
 
 const corsOptions = {
   origin: (origin, callback) => {
-    // Cho phép tool test không có origin (Postman, Render health check...)
+    // Không có origin → Postman / server-to-server / Render health check
     if (!origin) return callback(null, true);
-    // Cho phép mọi *.vercel.app để không bị lỗi khi Vercel tạo preview URL mới
-    if (allowedOrigins.includes(origin) || /\.vercel\.app$/.test(origin)) {
-      return callback(null, true);
-    }
+
+    // Khớp danh sách cứng
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+
+    // Cho phép mọi *.vercel.app (Vercel preview deployments)
+    if (/^https:\/\/[^.]+\.vercel\.app$/.test(origin)) return callback(null, true);
+
+    // Cho phép mọi *.onrender.com (Render services gọi nhau)
+    if (/^https:\/\/[^.]+\.onrender\.com$/.test(origin)) return callback(null, true);
+
+    console.warn(`[CORS] Blocked: ${origin}`);
     callback(new Error(`CORS blocked: ${origin}`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
-  allowedHeaders: ['Content-Type', 'Authorization']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400 // cache preflight 24h — giảm số lượng OPTIONS request
 };
 
 // ─── Startup ─────────────────────────────────────────────────────────────────
