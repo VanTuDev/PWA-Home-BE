@@ -86,7 +86,7 @@ export const verifyOtp = async (req, res) => {
       return res.status(404).json({ message: 'Không tìm thấy thông tin tài khoản đăng ký.' });
     }
 
-    if (!user.otp || user.otp.code !== otp) {
+    if (!user.otp?.code || user.otp.code !== otp) {
       return res.status(400).json({ message: 'Mã xác thực OTP không chính xác.' });
     }
 
@@ -134,7 +134,8 @@ export const login = async (req, res) => {
     }
 
     // Tài khoản chưa xác thực OTP
-    if (user.otp) {
+    // Dùng user.otp?.code thay vì user.otp vì Mongoose trả {} (truthy) khi field rỗng
+    if (user.otp?.code) {
       return res.status(403).json({ message: 'Tài khoản chưa được xác thực. Vui lòng kiểm tra email và nhập mã OTP.' });
     }
 

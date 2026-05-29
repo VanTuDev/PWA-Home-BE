@@ -110,25 +110,37 @@ const startServer = async () => {
     console.error('[Auto-Seed Products]', err.message);
   }
 
-  // Đảm bảo tài khoản admin luôn tồn tại
+  // Đảm bảo tài khoản admin luôn tồn tại và có thể login
   try {
     const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'Vantu.dev@gmail.com').toLowerCase();
     const ADMIN_PASS  = process.env.ADMIN_PASSWORD || 'Vantu16022003@';
     const existing    = await User.findOne({ email: ADMIN_EMAIL });
+
     if (!existing) {
       const salt   = await bcrypt.genSalt(10);
       const hashed = await bcrypt.hash(ADMIN_PASS, salt);
       await User.create({
-        name:  'Vân Tú - Admin',
-        email: ADMIN_EMAIL,
-        password: hashed,
-        phone: '0988888888',
-        role:  'admin'
+        name: 'Vân Tú - Admin', email: ADMIN_EMAIL,
+        password: hashed, phone: '0988888888', role: 'admin'
       });
       console.log(`[Init] Created admin: ${ADMIN_EMAIL}`);
+    } else {
+      let changed = false;
+      // Xoá OTP pending nếu có — admin không cần xác thực email
+      if (existing.otp) {
+        existing.otp = undefined;
+        changed = true;
+        console.log(`[Init] Cleared pending OTP for admin: ${ADMIN_EMAIL}`);
+      }
+      // Đảm bảo role là admin
+      if (existing.role !== 'admin') {
+        existing.role = 'admin';
+        changed = true;
+      }
+      if (changed) await existing.save();
     }
   } catch (err) {
-    console.error('[Init] Cannot create admin:', err.message);
+    console.error('[Init] Cannot ensure admin:', err.message);
   }
 
   const app    = express();
