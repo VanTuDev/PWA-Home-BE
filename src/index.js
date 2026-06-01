@@ -7,11 +7,8 @@ import fs from 'fs';
 
 import connectDB from './config/db.js';
 import { initializeSocket } from './services/socketService.js';
-import Pet from './models/Pet.js';
-import Product from './models/Product.js';
 import User from './models/User.js';
 import bcrypt from 'bcryptjs';
-import seedDB from './config/seed.js';
 
 import authRoutes from './routes/authRoutes.js';
 import petRoutes from './routes/petRoutes.js';
@@ -86,29 +83,7 @@ const startServer = async () => {
 
   await connectDB();
 
-  // Auto-seed pets nếu DB trống
-  try {
-    const petCount = await Pet.countDocuments();
-    if (petCount === 0) {
-      console.log('[Auto-Seed] Empty database — seeding pets...');
-      await seedDB();
-    } else {
-      console.log(`[Auto-Seed] ${petCount} pet records found.`);
-    }
-  } catch (err) {
-    console.error('[Auto-Seed Pets]', err.message);
-  }
-
-  // Auto-seed products nếu chưa có
-  try {
-    const productCount = await Product.countDocuments();
-    if (productCount === 0) {
-      const { seedProducts } = await import('./config/seed.js');
-      await seedProducts();
-    }
-  } catch (err) {
-    console.error('[Auto-Seed Products]', err.message);
-  }
+  // Seed đã được chạy — không auto-seed nữa để tránh ghi đè data production
 
   // Đảm bảo tài khoản admin luôn tồn tại và có thể login
   try {
@@ -127,7 +102,7 @@ const startServer = async () => {
     } else {
       let changed = false;
       // Xoá OTP pending nếu có — admin không cần xác thực email
-      if (existing.otp) {
+      if (existing.otp?.code) {
         existing.otp = undefined;
         changed = true;
         console.log(`[Init] Cleared pending OTP for admin: ${ADMIN_EMAIL}`);

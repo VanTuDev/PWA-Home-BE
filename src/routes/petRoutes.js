@@ -1,9 +1,11 @@
 import express from 'express';
-import { getPets, getPetById, createPet, updatePet, deletePet } from '../controllers/petController.js';
+import { getPets, getPetById, createPet, updatePet, deletePet, matchPets } from '../controllers/petController.js';
 import { protect, authorize } from '../middlewares/authMiddleware.js';
 import upload from '../middlewares/uploadMiddleware.js';
 
 const router = express.Router();
+
+router.post('/match', matchPets);
 
 router.route('/')
   .get(getPets)

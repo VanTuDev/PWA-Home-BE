@@ -1,99 +1,167 @@
+import mongoose from 'mongoose';
 import Post from '../models/Post.js';
 
-// Helper to format relative time in Vietnamese
-const formatRelativeTime = (date) => {
-  const now = new Date();
-  const diffMs = now - new Date(date);
-  const diffMins = Math.floor(diffMs / (1000 * 60));
-  const diffHours = Math.floor(diffMs / (1000 * 60 * 60));
-  const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-  if (diffMins < 1) return 'Vừa xong';
-  if (diffMins < 60) return `${diffMins} phút trước`;
-  if (diffHours < 24) return `${diffHours} giờ trước`;
-  if (diffDays === 1) return 'Hôm qua';
-  return `${diffDays} ngày trước`;
+const toDTO = (post, userId) => {
+  const obj = post.toObject ? post.toObject() : post;
+  return {
+    ...obj,
+    likeCount:    (obj.likedBy   || []).length,
+    commentCount: (obj.commentList || []).length,
+    isLiked:  userId ? (obj.likedBy  || []).some(id => id?.toString() === userId?.toString()) : false,
+    isSaved:  userId ? (obj.savedBy  || []).some(id => id?.toString() === userId?.toString()) : false,
+    isOwner:  userId ? obj.userId?.toString() === userId?.toString() : false
+  };
 };
 
-// @desc    Create a new community post
-// @route   POST /api/posts
-// @access  Private
+// @desc  GET /api/posts
+export const getPosts = async (req, res) => {
+  try {
+    const userId = req.user?._id;
+    const filter = req.query.tab === 'saved' && userId ? { savedBy: userId } : {};
+    const posts  = await Post.find(filter).sort({ createdAt: -1 });
+    return res.json(posts.map(p => toDTO(p, userId)));
+  } catch (err) {
+    console.error('getPosts:', err.message);
+    return res.status(500).json({ message: 'Lỗi khi tải bài viết.' });
+  }
+};
+
+// @desc  POST /api/posts
 export const createPost = async (req, res) => {
   try {
     const { content } = req.body;
-
-    if (!content) {
-      return res.status(400).json({ message: 'Vui lòng cung cấp nội dung chia sẻ.' });
-    }
+    if (!content?.trim()) return res.status(400).json({ message: 'Nội dung không được để trống.' });
 
     let image = '';
-    if (req.file) {
-      image = `/uploads/${req.file.filename}`;
-    } else if (req.body.image) {
-      image = req.body.image;
-    }
+    if (req.file)            image = req.file.path || `/uploads/${req.file.filename}`;
+    else if (req.body.image) image = req.body.image;
 
-    const post = new Post({
-      userId: req.user._id,
-      authorName: req.user.name,
-      authorAvatar: req.user.avatar || `https://i.pravatar.cc/150?u=${req.user._id}`,
-      authorIsExpert: req.user.role === 'admin' || req.user.role === 'manager',
-      content,
-      image,
-      likes: Math.floor(Math.random() * 5),
-      comments: 0
+    const u    = req.user;
+    const post = await Post.create({
+      userId:         u._id,
+      authorName:     u.name,
+      authorAvatar:   `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(u.name)}`,
+      authorIsExpert: ['admin', 'manager'].includes(u.role),
+      content: content.trim(),
+      image
     });
-
-    const savedPost = await post.save();
-    
-    // Add custom virtual/dynamic 'time' output
-    const postJson = savedPost.toJSON();
-    postJson.time = formatRelativeTime(savedPost.createdAt);
-
-    return res.status(201).json(postJson);
-  } catch (error) {
-    console.error('Create post error:', error.message);
-    return res.status(500).json({ message: 'Lỗi máy chủ khi đăng tin chia sẻ.' });
+    return res.status(201).json(toDTO(post, u._id));
+  } catch (err) {
+    console.error('createPost:', err.message);
+    return res.status(500).json({ message: 'Lỗi khi đăng bài.' });
   }
 };
 
-// @desc    Get all community posts
-// @route   GET /api/posts
-// @access  Public
-export const getPosts = async (req, res) => {
-  try {
-    const posts = await Post.find().sort({ createdAt: -1 });
-    
-    // Map with computed relative time strings
-    const formattedPosts = posts.map(post => {
-      const postJson = post.toJSON();
-      postJson.time = formatRelativeTime(post.createdAt);
-      return postJson;
-    });
-
-    return res.status(200).json(formattedPosts);
-  } catch (error) {
-    console.error('Get posts error:', error.message);
-    return res.status(500).json({ message: 'Lỗi máy chủ khi tải bảng tin cộng đồng.' });
-  }
-};
-
-// @desc    Like a community post
-// @route   PUT /api/posts/:id/like
-// @access  Private
-export const likePost = async (req, res) => {
+// @desc  PUT /api/posts/:id
+export const updatePost = async (req, res) => {
   try {
     const post = await Post.findById(req.params.id);
-    if (!post) {
-      return res.status(404).json({ message: 'Không tìm thấy bài đăng.' });
-    }
+    if (!post) return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+    if (!post.userId.equals(req.user._id)) return res.status(403).json({ message: 'Không có quyền chỉnh sửa.' });
 
-    post.likes += 1;
+    if (req.body.content) post.content = req.body.content.trim();
+    if (req.file)          post.image  = req.file.path || `/uploads/${req.file.filename}`;
+    else if (req.body.image !== undefined) post.image = req.body.image;
+
     await post.save();
+    return res.json(toDTO(post, req.user._id));
+  } catch (err) {
+    return res.status(500).json({ message: 'Lỗi khi cập nhật bài.' });
+  }
+};
 
-    return res.status(200).json({ likes: post.likes });
-  } catch (error) {
-    console.error('Like post error:', error.message);
-    return res.status(500).json({ message: 'Lỗi máy chủ khi thích bài viết.' });
+// @desc  DELETE /api/posts/:id
+export const deletePost = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+    if (!post.userId.equals(req.user._id) && !['admin', 'manager'].includes(req.user.role)) {
+      return res.status(403).json({ message: 'Không có quyền xóa.' });
+    }
+    await post.deleteOne();
+    return res.json({ message: 'Đã xóa bài viết.' });
+  } catch (err) {
+    return res.status(500).json({ message: 'Lỗi khi xóa bài.' });
+  }
+};
+
+// @desc  PUT /api/posts/:id/like
+export const toggleLike = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+    const uid = req.user._id;
+    const idx = post.likedBy.findIndex(id => id.equals(uid));
+    if (idx >= 0) post.likedBy.splice(idx, 1); else post.likedBy.push(uid);
+    await post.save();
+    return res.json({ likeCount: post.likedBy.length, isLiked: idx < 0 });
+  } catch (err) {
+    return res.status(500).json({ message: 'Lỗi khi cập nhật like.' });
+  }
+};
+
+// @desc  POST /api/posts/:id/comments
+export const addComment = async (req, res) => {
+  try {
+    const { content } = req.body;
+    if (!content?.trim()) return res.status(400).json({ message: 'Nội dung bình luận không được để trống.' });
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+    const comment = {
+      _id:        new mongoose.Types.ObjectId(),
+      userId:     req.user._id,
+      authorName: req.user.name,
+      content:    content.trim(),
+      createdAt:  new Date()
+    };
+    post.commentList.push(comment);
+    await post.save();
+    return res.status(201).json({ comment, commentCount: post.commentList.length });
+  } catch (err) {
+    return res.status(500).json({ message: 'Lỗi khi thêm bình luận.' });
+  }
+};
+
+// @desc  DELETE /api/posts/:id/comments/:commentId
+export const deleteComment = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+    const comment = post.commentList.id(req.params.commentId);
+    if (!comment) return res.status(404).json({ message: 'Không tìm thấy bình luận.' });
+    if (!comment.userId.equals(req.user._id) && !post.userId.equals(req.user._id) && !['admin','manager'].includes(req.user.role)) {
+      return res.status(403).json({ message: 'Không có quyền xóa bình luận này.' });
+    }
+    post.commentList.pull({ _id: req.params.commentId });
+    await post.save();
+    return res.json({ message: 'Đã xóa bình luận.', commentCount: post.commentList.length });
+  } catch (err) {
+    return res.status(500).json({ message: 'Lỗi khi xóa bình luận.' });
+  }
+};
+
+// @desc  PUT /api/posts/:id/share — public
+export const sharePost = async (req, res) => {
+  try {
+    const post = await Post.findByIdAndUpdate(req.params.id, { $inc: { shares: 1 } }, { new: true });
+    if (!post) return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+    return res.json({ shares: post.shares });
+  } catch (err) {
+    return res.status(500).json({ message: 'Lỗi khi cập nhật share.' });
+  }
+};
+
+// @desc  PUT /api/posts/:id/save
+export const toggleSave = async (req, res) => {
+  try {
+    const post = await Post.findById(req.params.id);
+    if (!post) return res.status(404).json({ message: 'Không tìm thấy bài viết.' });
+    const uid = req.user._id;
+    const idx = post.savedBy.findIndex(id => id.equals(uid));
+    if (idx >= 0) post.savedBy.splice(idx, 1); else post.savedBy.push(uid);
+    await post.save();
+    return res.json({ isSaved: idx < 0 });
+  } catch (err) {
+    return res.status(500).json({ message: 'Lỗi khi lưu bài.' });
   }
 };

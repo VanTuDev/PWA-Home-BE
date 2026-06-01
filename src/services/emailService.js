@@ -1,6 +1,6 @@
 import nodemailer from 'nodemailer';
 
-const FE_URL = process.env.FE_URL || 'http://localhost:3000';
+const FE_URL = process.env.FE_URL || 'https://pwa-home.vercel.app';
 
 const createTransporter = () =>
   nodemailer.createTransport({

@@ -1,4 +1,5 @@
 import Pet from '../models/Pet.js';
+import { ask, parseJSON, hasApiKey } from '../services/geminiService.js';
 
 // @desc    Get all pets (with query filter and search)
 // @route   GET /api/pets
@@ -129,6 +130,100 @@ export const deletePet = async (req, res) => {
   } catch (error) {
     console.error('Delete pet error:', error.message);
     return res.status(500).json({ message: 'Lỗi máy chủ khi xóa thú cưng.' });
+  }
+};
+
+// @desc    Match pets to user survey answers using Gemini AI
+// @route   POST /api/pets/match
+// @access  Public
+export const matchPets = async (req, res) => {
+  try {
+    const { answers } = req.body;
+    if (!answers || answers.length < 6) {
+      return res.status(400).json({ message: 'Thiếu câu trả lời khảo sát.' });
+    }
+
+    // Lấy tất cả pets (ưu tiên Ready, nhưng không bỏ qua pets khác)
+    const pets = await Pet.find({}).sort({ status: 1, createdAt: -1 }).lean();
+    if (!pets.length) {
+      return res.status(200).json([]);
+    }
+
+    const petList = pets.map(p => ({
+      id: p._id.toString(),
+      name: p.name,
+      breed: p.breed,
+      age: p.age,
+      gender: p.gender,
+      status: p.status,
+      tags: Array.isArray(p.tags) ? p.tags.join(', ') : '',
+      description: p.description || ''
+    }));
+
+    let matches = [];
+
+    if (hasApiKey()) {
+      const prompt = `Bạn là chuyên gia tư vấn nhận nuôi thú cưng tại Việt Nam.
+
+Thông tin người dùng:
+1. Loại thú cưng muốn nuôi: ${answers[0]}
+2. Không gian sống: ${answers[1]}
+3. Thời gian dành cho thú cưng mỗi ngày: ${answers[2]}
+4. Tính cách mong muốn: ${answers[3]}
+5. Kinh nghiệm nuôi thú cưng: ${answers[4]}
+6. Thành viên gia đình: ${answers[5]}
+
+Danh sách thú cưng trong hệ thống:
+${JSON.stringify(petList, null, 2)}
+
+Nhiệm vụ: Phân tích và xếp hạng MỌI thú cưng theo mức độ phù hợp với người dùng.
+- Bắt buộc trả về ÍT NHẤT 3 bé có điểm cao nhất, dù điểm thấp.
+- Ưu tiên bé có status="Ready" nhưng vẫn xét tất cả.
+- score từ 1-100 (không được để trống).
+- reason: 1-2 câu ngắn gọn tiếng Việt, giải thích tại sao phù hợp.
+
+Trả về JSON array (không markdown, không giải thích thêm):
+[{ "petId": "id_của_bé", "score": 85, "reason": "Lý do phù hợp..." }]
+
+Sắp xếp giảm dần theo score, tối đa 5 bé.`;
+
+      const raw = await ask(prompt);
+      matches = parseJSON(raw);
+    }
+
+    // Nếu AI không trả về đủ 3 kết quả, bổ sung bằng fallback
+    const MINIMUM = 3;
+    const matchedIds = new Set(matches.map(m => m.petId));
+
+    if (matches.length < MINIMUM) {
+      const remaining = pets
+        .filter(p => !matchedIds.has(p._id.toString()))
+        .slice(0, MINIMUM - matches.length);
+      remaining.forEach((p, i) => {
+        matches.push({
+          petId: p._id.toString(),
+          score: Math.max(50 - i * 5, 40),
+          reason: 'Bé này cũng có thể phù hợp với bạn dựa trên các tiêu chí cơ bản.'
+        });
+      });
+    }
+
+    // Enrich với đầy đủ thông tin pet
+    const petMap = Object.fromEntries(pets.map(p => [p._id.toString(), p]));
+    const result = matches
+      .map(m => {
+        const pet = petMap[m.petId];
+        if (!pet) return null;
+        return { pet, score: m.score, reason: m.reason };
+      })
+      .filter(Boolean)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 5);
+
+    return res.status(200).json(result);
+  } catch (err) {
+    console.error('Match pets error:', err.message);
+    return res.status(500).json({ message: 'Lỗi khi phân tích tương thích.' });
   }
 };
 

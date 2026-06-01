@@ -34,6 +34,18 @@ export const protect = async (req, res, next) => {
   }
 };
 
+// Middleware tuỳ chọn — không chặn nếu không có token, chỉ gắn user nếu có
+export const optionalProtect = async (req, res, next) => {
+  const authHeader = req.headers.authorization;
+  if (!authHeader?.startsWith('Bearer ')) return next();
+  try {
+    const token   = authHeader.split(' ')[1];
+    const decoded = jwt.verify(token, process.env.JWT_SECRET || 'super_secret_pwa_home_token_key_123');
+    req.user      = await User.findById(decoded.id).select('-password');
+  } catch { /* token invalid — bỏ qua */ }
+  next();
+};
+
 // Middleware to restrict access to specific roles (e.g., admin, manager, staff)
 export const authorize = (...roles) => {
   return (req, res, next) => {
