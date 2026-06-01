@@ -47,11 +47,12 @@ services:
         sync: false             # điền trong Render Dashboard
       - key: VNPAY_URL
         value: https://sandbox.vnpayment.vn/paymentv2/vpcpay.html
-      # Thay YOUR_RENDER_URL bằng URL thực sau khi deploy
       - key: VNPAY_RETURN_URL
-        value: https://YOUR_RENDER_URL.onrender.com/api/orders/vnpay_return
+        value: https://pwa-home-be.onrender.com/api/orders/vnpay_return
       - key: VNPAY_IPN_URL
-        value: https://YOUR_RENDER_URL.onrender.com/api/orders/vnpay_ipn
+        value: https://pwa-home-be.onrender.com/api/orders/vnpay_ipn
+      - key: GEMINI_API_KEY
+        sync: false             # điền trong Render Dashboard
 
       # ── Email SMTP ────────────────────────────────────────────────────────
       - key: SMTP_HOST

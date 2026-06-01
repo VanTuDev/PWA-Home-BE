@@ -15,11 +15,15 @@ export const createOrder = async (req, res) => {
       return res.status(400).json({ message: 'Vui lòng điền đầy đủ thông tin đơn hàng và địa chỉ giao hàng.' });
     }
 
-    // Resolve products & calculate subtotal
+    // Batch fetch tất cả products trong 1 query thay vì N queries
+    const productIds = items.map(i => i.productId);
+    const products   = await Product.find({ _id: { $in: productIds } }).lean();
+    const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
+
     let subtotal = 0;
     const orderItems = [];
     for (const item of items) {
-      const product = await Product.findById(item.productId);
+      const product = productMap[item.productId];
       if (!product) return res.status(400).json({ message: `Sản phẩm không tồn tại.` });
       if (product.stock < item.quantity) return res.status(400).json({ message: `${product.name} không đủ hàng tồn kho.` });
 
