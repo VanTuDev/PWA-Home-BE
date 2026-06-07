@@ -18,7 +18,12 @@ export const createAdoption = async (req, res) => {
     }
 
     // Check if pet exists
-    const pet = await Pet.findById(petId);
+    let pet;
+    try {
+      pet = await Pet.findById(petId);
+    } catch {
+      return res.status(400).json({ message: 'petId không hợp lệ.' });
+    }
     if (!pet) {
       return res.status(404).json({ message: 'Không tìm thấy thông tin thú cưng ứng tuyển.' });
     }

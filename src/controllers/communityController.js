@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import Post from '../models/Post.js';
 
+const fileUrl = (f) => !f ? '' : f.path?.startsWith('http') ? f.path : `/uploads/${f.filename}`;
+
 const toDTO = (post, userId) => {
   const obj = post.toObject ? post.toObject() : post;
   return {
@@ -33,7 +35,7 @@ export const createPost = async (req, res) => {
     if (!content?.trim()) return res.status(400).json({ message: 'Nội dung không được để trống.' });
 
     let image = '';
-    if (req.file)            image = req.file.path || `/uploads/${req.file.filename}`;
+    if (req.file)            image = fileUrl(req.file);
     else if (req.body.image) image = req.body.image;
 
     const u    = req.user;
@@ -60,7 +62,7 @@ export const updatePost = async (req, res) => {
     if (!post.userId.equals(req.user._id)) return res.status(403).json({ message: 'Không có quyền chỉnh sửa.' });
 
     if (req.body.content) post.content = req.body.content.trim();
-    if (req.file)          post.image  = req.file.path || `/uploads/${req.file.filename}`;
+    if (req.file)          post.image  = fileUrl(req.file);
     else if (req.body.image !== undefined) post.image = req.body.image;
 
     await post.save();

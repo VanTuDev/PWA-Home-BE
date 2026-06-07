@@ -19,6 +19,7 @@ const cloudinaryStorage = new CloudinaryStorage({
     else if (url.includes('/products'))  folder = 'pawhome/products';
     else if (url.includes('/adoptions')) folder = 'pawhome/adoptions';
     else if (url.includes('/posts'))     folder = 'pawhome/community';
+    else if (url.includes('/auth'))      folder = 'pawhome/cccd';
     return {
       folder,
       allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'gif'],

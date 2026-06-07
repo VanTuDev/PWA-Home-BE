@@ -1,5 +1,7 @@
 import Product from '../models/Product.js';
 
+const fileUrl = (f) => !f ? '' : f.path?.startsWith('http') ? f.path : `/uploads/${f.filename}`;
+
 // @desc  GET /api/products  — public, with filters
 export const getProducts = async (req, res) => {
   try {
@@ -55,7 +57,7 @@ export const createProduct = async (req, res) => {
     if (!name || !price) return res.status(400).json({ message: 'Tên và giá là bắt buộc.' });
 
     let image = req.file
-      ? (req.file.path || `/uploads/${req.file.filename}`)
+      ? fileUrl(req.file)
       : (req.body.image || '');
 
     const product = await Product.create({
@@ -87,7 +89,7 @@ export const updateProduct = async (req, res) => {
     if (stock       !== undefined) product.stock       = Number(stock);
     if (rating      !== undefined) product.rating      = Number(rating);
     if (isNew       !== undefined) product.isNew       = isNew === 'true' || isNew === true;
-    if (req.file)        product.image = req.file.path || `/uploads/${req.file.filename}`;
+    if (req.file)        product.image = fileUrl(req.file);
     else if (req.body.image) product.image = req.body.image;
 
     const updated = await product.save();

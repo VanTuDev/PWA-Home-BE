@@ -1,275 +1,133 @@
-import crypto from 'crypto';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
-import { sendOtpEmail, sendResetPasswordEmail } from '../services/emailService.js';
 
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET || 'super_secret_pwa_home_token_key_123', {
-    expiresIn: '30d'
-  });
-};
+const generateToken = (id) =>
+  jwt.sign({ id }, process.env.JWT_SECRET || 'paw_secret_key', { expiresIn: '30d' });
 
-// @desc    Register a new user & send OTP to email
 // @route   POST /api/auth/register
-// @access  Public
+// @access  Public  (multipart/form-data — fields: name, email, password, phone + files: cccdFront, cccdBack)
 export const register = async (req, res) => {
   try {
     const { name, email, password, phone } = req.body;
 
     if (!name || !email || !password || !phone) {
-      return res.status(400).json({ message: 'Vui lòng điền đầy đủ các thông tin.' });
+      return res.status(400).json({ message: 'Vui lòng điền đầy đủ họ tên, email, mật khẩu và số điện thoại.' });
+    }
+    if (password.length < 6) {
+      return res.status(400).json({ message: 'Mật khẩu phải có ít nhất 6 ký tự.' });
     }
 
-    const existingUser = await User.findOne({ email: email.toLowerCase().trim() });
-
-    // Email đã đăng ký và đã xác thực OTP
-    if (existingUser && !existingUser.otp?.code) {
+    const existing = await User.findOne({ email: email.toLowerCase().trim() });
+    if (existing) {
       return res.status(400).json({
-        message: 'Email này đã được đăng ký. Vui lòng đăng nhập hoặc dùng chức năng "Quên mật khẩu".',
+        message: 'Email này đã được đăng ký. Vui lòng đăng nhập hoặc dùng email khác.',
         code: 'EMAIL_ALREADY_REGISTERED',
       });
     }
 
-    const otpCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const otpExpires = new Date(Date.now() + 10 * 60 * 1000);
+    // CCCD images (uploaded via multer → Cloudinary or local)
+    const cccdFront = req.files?.cccdFront?.[0]
+      ? (req.files.cccdFront[0].path?.startsWith('http')
+          ? req.files.cccdFront[0].path
+          : `/uploads/${req.files.cccdFront[0].filename}`)
+      : '';
+    const cccdBack = req.files?.cccdBack?.[0]
+      ? (req.files.cccdBack[0].path?.startsWith('http')
+          ? req.files.cccdBack[0].path
+          : `/uploads/${req.files.cccdBack[0].filename}`)
+      : '';
 
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(password, salt);
+    const salt     = await bcrypt.genSalt(10);
+    const hashed   = await bcrypt.hash(password, salt);
 
-    if (existingUser && existingUser.otp) {
-      // Đã đăng ký nhưng chưa xác thực → cập nhật OTP mới (resend)
-      existingUser.name = name;
-      existingUser.phone = phone;
-      existingUser.password = hashedPassword;
-      existingUser.otp = { code: otpCode, expiresAt: otpExpires };
-      await existingUser.save();
-    } else {
-      // Tài khoản mới
-      const newUser = new User({
-        name,
-        email,
-        password: hashedPassword,
-        phone,
-        otp: { code: otpCode, expiresAt: otpExpires }
-      });
-      await newUser.save();
-    }
+    const user = await User.create({
+      name: name.trim(),
+      email: email.toLowerCase().trim(),
+      password: hashed,
+      phone: phone.trim(),
+      cccdFront,
+      cccdBack,
+    });
 
-    let emailSent = false;
-    try {
-      emailSent = await sendOtpEmail(email.toLowerCase().trim(), name, otpCode);
-    } catch (emailErr) {
-      console.error('Email send failed:', emailErr.message);
-      // Không throw — trả lỗi rõ ràng cho user
-      return res.status(500).json({
-        message: 'Không thể gửi email xác thực. Vui lòng thử lại sau vài phút.',
-        code: 'EMAIL_SEND_FAILED',
-      });
-    }
+    console.log(`[Auth] New user registered: ${user.email}`);
 
-    const response = { message: 'Mã xác nhận OTP đã được gửi tới email của bạn. Vui lòng kiểm tra hộp thư (kể cả Spam).' };
-
-    // Demo mode: trả OTP thẳng để dev test không cần email
-    if (!emailSent) {
-      response.demoOtp = otpCode;
-      response.message = 'Mã OTP đã được tạo (Demo mode — chưa cấu hình email).';
-    }
-
-    return res.status(200).json(response);
-  } catch (error) {
-    console.error('Registration error:', error.message);
+    return res.status(201).json({
+      message: 'Đăng ký thành công! Chào mừng bạn đến với PAW Home.',
+      token: generateToken(user._id),
+      user: {
+        id:        user._id,
+        name:      user.name,
+        email:     user.email,
+        phone:     user.phone,
+        role:      user.role,
+        cccdFront: user.cccdFront,
+        cccdBack:  user.cccdBack,
+        createdAt: user.createdAt,
+      },
+    });
+  } catch (err) {
+    console.error('[Auth] register error:', err.message);
     return res.status(500).json({ message: 'Lỗi máy chủ trong quá trình đăng ký.' });
   }
 };
 
-// @desc    Verify OTP & complete registration, auto-login
-// @route   POST /api/auth/verify-otp
-// @access  Public
-export const verifyOtp = async (req, res) => {
-  try {
-    const { email, otp } = req.body;
-
-    if (!email || !otp) {
-      return res.status(400).json({ message: 'Thiếu email hoặc mã xác thực OTP.' });
-    }
-
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(404).json({ message: 'Không tìm thấy thông tin tài khoản đăng ký.' });
-    }
-
-    if (!user.otp?.code || user.otp.code !== otp) {
-      return res.status(400).json({ message: 'Mã xác thực OTP không chính xác.' });
-    }
-
-    if (new Date() > new Date(user.otp.expiresAt)) {
-      return res.status(400).json({ message: 'Mã xác thực OTP đã hết hạn. Vui lòng nhấn "Gửi lại mã".' });
-    }
-
-    // Xóa OTP → tài khoản hoạt động
-    user.otp = undefined;
-    await user.save();
-
-    // Trả về token để FE tự động đăng nhập sau khi xác thực
-    return res.status(200).json({
-      message: 'Đăng ký thành công! Chào mừng bạn đến với PAW Home.',
-      token: generateToken(user._id),
-      user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        createdAt: user.createdAt
-      }
-    });
-  } catch (error) {
-    console.error('OTP Verification error:', error.message);
-    return res.status(500).json({ message: 'Lỗi xác nhận OTP trên máy chủ.' });
-  }
-};
-
-// @desc    Auth user & get token
 // @route   POST /api/auth/login
-// @access  Public
 export const login = async (req, res) => {
   try {
     const { email, password } = req.body;
-
     if (!email || !password) {
       return res.status(400).json({ message: 'Vui lòng cung cấp email và mật khẩu.' });
     }
 
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
     if (!user) {
-      return res.status(401).json({ message: 'Tài khoản email hoặc mật khẩu không chính xác.' });
-    }
-
-    // Tài khoản chưa xác thực OTP
-    // Dùng user.otp?.code thay vì user.otp vì Mongoose trả {} (truthy) khi field rỗng
-    if (user.otp?.code) {
-      return res.status(403).json({ message: 'Tài khoản chưa được xác thực. Vui lòng kiểm tra email và nhập mã OTP.' });
+      return res.status(401).json({ message: 'Email hoặc mật khẩu không chính xác.' });
     }
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(401).json({ message: 'Tài khoản email hoặc mật khẩu không chính xác.' });
+      return res.status(401).json({ message: 'Email hoặc mật khẩu không chính xác.' });
     }
 
     return res.status(200).json({
       token: generateToken(user._id),
       user: {
-        id: user._id,
-        name: user.name,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        job: user.job,
-        salary: user.salary,
-        address: user.address,
-        createdAt: user.createdAt
-      }
+        id:         user._id,
+        name:       user.name,
+        email:      user.email,
+        phone:      user.phone,
+        role:       user.role,
+        job:        user.job,
+        salary:     user.salary,
+        address:    user.address,
+        bio:        user.bio,
+        avatar:     user.avatar,
+        coverPhoto: user.coverPhoto,
+        cccdFront:  user.cccdFront,
+        cccdBack:   user.cccdBack,
+        createdAt:  user.createdAt,
+      },
     });
-  } catch (error) {
-    console.error('Login error:', error.message);
+  } catch (err) {
+    console.error('[Auth] login error:', err.message);
     return res.status(500).json({ message: 'Lỗi đăng nhập trên máy chủ.' });
   }
 };
 
-// @desc    Gửi email đặt lại mật khẩu
-// @route   POST /api/auth/forgot-password
-// @access  Public
-export const forgotPassword = async (req, res) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ message: 'Vui lòng cung cấp địa chỉ email.' });
-
-    const user = await User.findOne({ email: email.toLowerCase() });
-
-    // Không tiết lộ email có tồn tại hay không — bảo mật tốt hơn
-    const GENERIC_MSG = 'Nếu email tồn tại trong hệ thống, liên kết đặt lại mật khẩu đã được gửi.';
-
-    if (!user) return res.status(200).json({ message: GENERIC_MSG });
-
-    // Tạo token ngẫu nhiên 32 bytes
-    const token = crypto.randomBytes(32).toString('hex');
-    user.resetPasswordToken   = token;
-    user.resetPasswordExpires = new Date(Date.now() + 60 * 60 * 1000); // 1 giờ
-    await user.save();
-
-    let emailSent = false;
-    try {
-      emailSent = await sendResetPasswordEmail(email, user.name, token);
-    } catch (emailErr) {
-      console.error('[ForgotPassword] Email send failed:', emailErr.message);
-      return res.status(500).json({ message: 'Không thể gửi email đặt lại mật khẩu. Vui lòng thử lại sau.' });
-    }
-
-    const response = { message: GENERIC_MSG };
-    if (!emailSent) {
-      const feUrl = process.env.FE_URL || 'http://localhost:3000';
-      response.demoResetUrl = `${feUrl}/reset-password?token=${token}`;
-    }
-
-    return res.status(200).json(response);
-  } catch (error) {
-    console.error('[ForgotPassword] Error:', error.message);
-    return res.status(500).json({ message: 'Lỗi máy chủ. Vui lòng thử lại.' });
-  }
-};
-
-// @desc    Đặt lại mật khẩu bằng token
-// @route   POST /api/auth/reset-password
-// @access  Public
-export const resetPassword = async (req, res) => {
-  try {
-    const { token, newPassword } = req.body;
-    if (!token || !newPassword) {
-      return res.status(400).json({ message: 'Thiếu token hoặc mật khẩu mới.' });
-    }
-    if (newPassword.length < 6) {
-      return res.status(400).json({ message: 'Mật khẩu phải có ít nhất 6 ký tự.' });
-    }
-
-    const user = await User.findOne({
-      resetPasswordToken:   token,
-      resetPasswordExpires: { $gt: new Date() }
-    });
-
-    if (!user) {
-      return res.status(400).json({ message: 'Liên kết không hợp lệ hoặc đã hết hạn. Vui lòng gửi yêu cầu mới.' });
-    }
-
-    const salt = await bcrypt.genSalt(10);
-    user.password             = await bcrypt.hash(newPassword, salt);
-    user.resetPasswordToken   = undefined;
-    user.resetPasswordExpires = undefined;
-    await user.save();
-
-    return res.status(200).json({ message: 'Mật khẩu đã được đặt lại thành công! Bạn có thể đăng nhập ngay.' });
-  } catch (error) {
-    console.error('Reset password error:', error.message);
-    return res.status(500).json({ message: 'Lỗi máy chủ. Vui lòng thử lại.' });
-  }
-};
-
-// @desc    Lấy thông tin profile
 // @route   GET /api/auth/profile
-// @access  Private
 export const getProfile = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select('-password -otp -resetPasswordToken -resetPasswordExpires');
+    const user = await User.findById(req.user._id).select('-password');
     if (!user) return res.status(404).json({ message: 'Không tìm thấy tài khoản.' });
     return res.status(200).json(user);
-  } catch (error) {
+  } catch (err) {
+    console.error('[Auth] getProfile error:', err.message);
     return res.status(500).json({ message: 'Lỗi máy chủ.' });
   }
 };
 
-// @desc    Cập nhật profile (tên, sdt, địa chỉ, nghề nghiệp, bio, avatar, ảnh bìa)
 // @route   PUT /api/auth/profile
-// @access  Private
 export const updateProfile = async (req, res) => {
   try {
     const { name, phone, address, job, salary, bio } = req.body;
@@ -283,16 +141,16 @@ export const updateProfile = async (req, res) => {
     if (salary  !== undefined) user.salary  = salary;
     if (bio     !== undefined) user.bio     = bio.slice(0, 300);
 
-    // Ảnh từ Cloudinary upload (field names: avatar / coverPhoto)
     if (req.files?.avatar?.[0]) {
-      user.avatar = req.files.avatar[0].path || `/uploads/${req.files.avatar[0].filename}`;
+      const f = req.files.avatar[0];
+      user.avatar = f.path?.startsWith('http') ? f.path : `/uploads/${f.filename}`;
     }
     if (req.files?.coverPhoto?.[0]) {
-      user.coverPhoto = req.files.coverPhoto[0].path || `/uploads/${req.files.coverPhoto[0].filename}`;
+      const f = req.files.coverPhoto[0];
+      user.coverPhoto = f.path?.startsWith('http') ? f.path : `/uploads/${f.filename}`;
     }
 
     const updated = await user.save();
-
     return res.status(200).json({
       message: 'Cập nhật hồ sơ thành công!',
       user: {
@@ -308,17 +166,15 @@ export const updateProfile = async (req, res) => {
         avatar:     updated.avatar,
         coverPhoto: updated.coverPhoto,
         createdAt:  updated.createdAt,
-      }
+      },
     });
-  } catch (error) {
-    console.error('Update profile error:', error.message);
+  } catch (err) {
+    console.error('[Auth] updateProfile error:', err.message);
     return res.status(500).json({ message: 'Lỗi máy chủ.' });
   }
 };
 
-// @desc    Đổi mật khẩu (đã đăng nhập)
 // @route   PUT /api/auth/change-password
-// @access  Private
 export const changePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -327,9 +183,6 @@ export const changePassword = async (req, res) => {
     }
     if (newPassword.length < 6) {
       return res.status(400).json({ message: 'Mật khẩu mới phải có ít nhất 6 ký tự.' });
-    }
-    if (currentPassword === newPassword) {
-      return res.status(400).json({ message: 'Mật khẩu mới phải khác mật khẩu hiện tại.' });
     }
 
     const user = await User.findById(req.user._id);
@@ -345,8 +198,8 @@ export const changePassword = async (req, res) => {
     await user.save();
 
     return res.status(200).json({ message: 'Đổi mật khẩu thành công!' });
-  } catch (error) {
-    console.error('Change password error:', error.message);
-    return res.status(500).json({ message: 'Lỗi máy chủ. Vui lòng thử lại.' });
+  } catch (err) {
+    console.error('[Auth] changePassword error:', err.message);
+    return res.status(500).json({ message: 'Lỗi máy chủ.' });
   }
 };

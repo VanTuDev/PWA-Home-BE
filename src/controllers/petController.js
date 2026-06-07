@@ -1,6 +1,8 @@
 import Pet from '../models/Pet.js';
 import { ask, parseJSON, hasApiKey } from '../services/geminiService.js';
 
+const fileUrl = (f) => !f ? '' : f.path?.startsWith('http') ? f.path : `/uploads/${f.filename}`;
+
 // @desc    Get all pets (with query filter and search)
 // @route   GET /api/pets
 // @access  Public
@@ -74,7 +76,7 @@ export const createPet = async (req, res) => {
     // req.file.path = Cloudinary URL | req.file.filename = local filename
     let image = '';
     if (req.file) {
-      image = req.file.path || `/uploads/${req.file.filename}`;
+      image = fileUrl(req.file);
     } else if (req.body.image) {
       image = req.body.image;
     } else {
@@ -252,7 +254,7 @@ export const updatePet = async (req, res) => {
 
     // Handle Image
     if (req.file) {
-      pet.image = req.file.path || `/uploads/${req.file.filename}`;
+      pet.image = fileUrl(req.file);
     } else if (req.body.image) {
       pet.image = req.body.image;
     }
