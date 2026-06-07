@@ -1,5 +1,6 @@
 import Adoption from '../models/Adoption.js';
 import Pet from '../models/Pet.js';
+import Donation from '../models/Donation.js';
 
 // @desc    Create a new adoption application
 // @route   POST /api/adoptions
@@ -24,6 +25,17 @@ export const createAdoption = async (req, res) => {
 
     if (pet.status === 'Adopted') {
       return res.status(400).json({ message: 'Bé thú cưng này đã được nhận nuôi thành công bởi một chủ nhân khác.' });
+    }
+
+    // Kiểm tra donation bắt buộc
+    if (pet.donationAmount > 0) {
+      const donation = await Donation.findOne({ petId, userId: req.user._id, type: 'adoption', status: 'paid' });
+      if (!donation) {
+        return res.status(403).json({
+          code: 'DONATION_REQUIRED',
+          message: `Bạn cần hoàn thành khoản đóng góp ${pet.donationAmount.toLocaleString('vi-VN')}đ trước khi đăng ký nhận nuôi bé ${pet.name}.`
+        });
+      }
     }
 
     const adoption = new Adoption({

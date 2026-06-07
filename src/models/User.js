@@ -39,6 +39,19 @@ const userSchema = new mongoose.Schema({
     type: String,
     default: 'Chưa cập nhật'
   },
+  bio: {
+    type: String,
+    default: '',
+    maxlength: 300
+  },
+  avatar: {
+    type: String,
+    default: ''
+  },
+  coverPhoto: {
+    type: String,
+    default: ''
+  },
   otp: {
     code: String,
     expiresAt: Date

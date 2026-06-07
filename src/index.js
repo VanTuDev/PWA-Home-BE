@@ -18,6 +18,7 @@ import adoptionRoutes from './routes/adoptionRoutes.js';
 import donationRoutes from './routes/donationRoutes.js';
 import communityRoutes from './routes/communityRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
+import chatRoutes  from './routes/chatRoutes.js';
 
 dotenv.config();
 
@@ -139,14 +140,12 @@ const startServer = async () => {
   app.use('/api/donations', donationRoutes);
   app.use('/api/posts',     communityRoutes);
   app.use('/api/admin',     adminRoutes);
+  app.use('/api/chat',      chatRoutes);
 
-  // Health check (Render pings this to keep service awake)
-  app.get('/', (req, res) => res.json({
-    status: 'active',
-    name:   'PAW Home API',
-    version: '1.0.0',
-    env:    process.env.NODE_ENV || 'development'
-  }));
+  // Health check — cron-job.org ping mỗi 10 phút để Render không ngủ
+  const healthHandler = (req, res) => res.json({ status: 'ok', ts: Date.now() });
+  app.get('/', healthHandler);
+  app.get('/api/health', healthHandler);
 
   // Global error handler
   app.use((err, req, res, next) => {
@@ -163,7 +162,12 @@ const startServer = async () => {
   server.listen(PORT, '0.0.0.0', () => {
     console.log(`\n==========================================`);
     console.log(`  PAW Home API  →  http://0.0.0.0:${PORT}`);
-    console.log(`  ENV: ${process.env.NODE_ENV || 'development'}`);
+    console.log(`  ENV        : ${process.env.NODE_ENV || 'development'}`);
+    console.log(`  MongoDB    : ${process.env.MONGO_URI ? '✓ configured' : '✗ MISSING'}`);
+    console.log(`  SMTP       : ${process.env.SMTP_USER ? `✓ ${process.env.SMTP_USER}` : '✗ not set (demo mode)'}`);
+    console.log(`  PayOS      : ${process.env.PAYOS_CLIENT_ID ? '✓ configured' : '✗ not set (dev mode)'}`);
+    console.log(`  Cloudinary : ${process.env.CLOUDINARY_CLOUD_NAME ? '✓ configured' : '✗ not set'}`);
+    console.log(`  FE_URL     : ${process.env.FE_URL || '(default)'}`);
     console.log(`==========================================\n`);
   });
 };

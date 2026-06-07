@@ -1,26 +1,32 @@
 import express from 'express';
-import { createDonation, getDonations } from '../controllers/donationController.js';
+import {
+  createDonation, createAdoptionDonation, checkAdoptionDonation,
+  payosDonationWebhook, payosDonationReturn, getDonations
+} from '../controllers/donationController.js';
+import { protect } from '../middlewares/authMiddleware.js';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
 
 const router = express.Router();
 
-// Optional user context extractor for donations
 const optionalProtect = async (req, res, next) => {
-  if (
-    req.headers.authorization &&
-    req.headers.authorization.startsWith('Bearer')
-  ) {
+  const auth = req.headers.authorization;
+  if (auth?.startsWith('Bearer')) {
     try {
-      const token = req.headers.authorization.split(' ')[1];
-      const decoded = jwt.verify(token, process.env.JWT_SECRET || 'super_secret_pwa_home_token_key_123');
+      const decoded = jwt.verify(auth.split(' ')[1], process.env.JWT_SECRET);
       req.user = await User.findById(decoded.id).select('-password');
-    } catch (error) {
-      // Ignore error to allow anonymous donation
-    }
+    } catch {}
   }
   next();
 };
+
+// PayOS callbacks (no auth) — đặt trước route khác
+router.get( '/payos_return',  payosDonationReturn);
+router.post('/payos_webhook', payosDonationWebhook);
+
+// Adoption donation
+router.post('/adoption', protect, createAdoptionDonation);
+router.get( '/check',    protect, checkAdoptionDonation);
 
 router.route('/')
   .post(optionalProtect, createDonation)

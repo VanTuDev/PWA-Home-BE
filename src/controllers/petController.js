@@ -103,6 +103,7 @@ export const createPet = async (req, res) => {
       tags: tagsArray,
       aiMatching: req.body.aiMatching || Math.floor(Math.random() * 30) + 70,
       story: story || '',
+      donationAmount: Number(req.body.donationAmount) || 0,
       healthInfo: {
         vaccinated: vaccinated === 'true' || vaccinated === true,
         neutered: neutered === 'true' || neutered === true,
@@ -264,6 +265,9 @@ export const updatePet = async (req, res) => {
         pet.tags = tags.split(',').map(t => t.trim());
       }
     }
+
+    // Handle donationAmount
+    if (req.body.donationAmount !== undefined) pet.donationAmount = Number(req.body.donationAmount) || 0;
 
     // Handle Health Info
     if (vaccinated !== undefined) pet.healthInfo.vaccinated = vaccinated === 'true' || vaccinated === true;

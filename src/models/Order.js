@@ -28,8 +28,8 @@ const orderSchema = new mongoose.Schema({
   discount:             { type: Number, default: 0 },
   total:                { type: Number, default: 0 },
   note:                 { type: String, default: '' },
-  vnpayTxnRef:          { type: String, default: '' },
-  vnpayTransactionId:   { type: String, default: '' }
+  payosOrderCode:       { type: Number, default: 0 },
+  payosTransactionId:   { type: String, default: '' }
 }, { timestamps: true });
 
 orderSchema.virtual('id').get(function () { return this._id.toHexString(); });

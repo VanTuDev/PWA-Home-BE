@@ -50,6 +50,10 @@ const petSchema = new mongoose.Schema({
     type: String,
     default: ''
   },
+  donationAmount: {
+    type: Number,
+    default: 0
+  },
   healthInfo: {
     vaccinated: { type: Boolean, default: false },
     neutered: { type: Boolean, default: false },

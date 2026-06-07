@@ -1,64 +1,157 @@
 import Donation from '../models/Donation.js';
 import Pet from '../models/Pet.js';
+import { createPaymentLink, verifyWebhook, isConfigured } from '../services/payosService.js';
 
-// @desc    Create a new donation entry
-// @route   POST /api/donations
-// @access  Public (or Private if logged in)
+const FE_BASE = process.env.FE_URL || 'http://localhost:3000';
+const BE_BASE = process.env.BE_URL || 'https://pwa-home-be.onrender.com';
+
+// @desc  POST /api/donations  — general donation (ghi nhận ngay)
 export const createDonation = async (req, res) => {
   try {
     const { petId, amount, donorName, message } = req.body;
-
-    if (!amount || amount <= 0) {
+    if (!amount || amount <= 0)
       return res.status(400).json({ message: 'Vui lòng cung cấp số tiền quyên góp hợp lệ.' });
-    }
 
-    // Set user ID if logged in, otherwise null
-    const userId = req.user ? req.user._id : null;
-    let finalDonorName = donorName || 'Mạnh thường quân ẩn danh';
-    
-    if (req.user && !donorName) {
-      finalDonorName = req.user.name;
-    }
+    const userId    = req.user?._id || null;
+    const finalName = donorName || req.user?.name || 'Mạnh thường quân ẩn danh';
 
-    // If petId is provided, check if pet exists
     if (petId) {
       const pet = await Pet.findById(petId);
-      if (!pet) {
-        return res.status(404).json({ message: 'Không tìm thấy bé thú cưng tương ứng.' });
-      }
+      if (!pet) return res.status(404).json({ message: 'Không tìm thấy bé thú cưng.' });
     }
 
-    const donation = new Donation({
-      petId: petId || null,
-      userId,
-      donorName: finalDonorName,
-      amount: parseFloat(amount),
-      message: message || ''
+    const donation = await Donation.create({
+      petId: petId || null, userId, donorName: finalName,
+      amount: parseFloat(amount), message: message || '',
+      type: 'general', status: 'paid',
     });
 
-    const savedDonation = await donation.save();
-    return res.status(201).json({
-      message: 'Cảm ơn tấm lòng vàng của bạn đã ủng hộ trạm cứu hộ!',
-      donation: savedDonation
-    });
-  } catch (error) {
-    console.error('Create donation error:', error.message);
+    return res.status(201).json({ message: 'Cảm ơn tấm lòng của bạn!', donation });
+  } catch (err) {
+    console.error('createDonation error:', err.message);
     return res.status(500).json({ message: 'Lỗi máy chủ khi xử lý quyên góp.' });
   }
 };
 
-// @desc    Get all donations
-// @route   GET /api/donations
-// @access  Public
+// @desc  POST /api/donations/adoption  — donation bắt buộc trước khi nhận nuôi (qua PayOS)
+export const createAdoptionDonation = async (req, res) => {
+  try {
+    const { petId } = req.body;
+    if (!petId) return res.status(400).json({ message: 'Thiếu petId.' });
+
+    const pet = await Pet.findById(petId);
+    if (!pet) return res.status(404).json({ message: 'Không tìm thấy bé thú cưng.' });
+    if (pet.donationAmount <= 0) return res.status(400).json({ message: 'Bé này không yêu cầu đóng góp.' });
+    if (pet.status === 'Adopted') return res.status(400).json({ message: 'Bé này đã được nhận nuôi.' });
+
+    const userId = req.user._id;
+
+    // Đã donate thành công trước đó → báo ngay
+    const existing = await Donation.findOne({ petId, userId, type: 'adoption', status: 'paid' });
+    if (existing) return res.status(200).json({ alreadyDonated: true });
+
+    const orderCode = Date.now();
+    await Donation.create({
+      petId, userId,
+      donorName:  req.user.name,
+      donorEmail: req.user.email || '',
+      amount:     pet.donationAmount,
+      type:       'adoption',
+      status:     'pending',
+      payosOrderCode: orderCode,
+    });
+
+    if (!isConfigured()) {
+      // Dev: tự mark paid
+      await Donation.findOneAndUpdate({ payosOrderCode: orderCode }, { status: 'paid' });
+      return res.status(201).json({ alreadyDonated: true });
+    }
+
+    const payosData = await createPaymentLink({
+      orderCode,
+      amount:      pet.donationAmount,
+      description: `Donate ${pet.name}`.slice(0, 25),
+      items: [{ name: `Đóng góp nhận nuôi ${pet.name}`.slice(0, 50), quantity: 1, price: pet.donationAmount }],
+      returnUrl:  `${BE_BASE}/api/donations/payos_return`,
+      cancelUrl:  `${FE_BASE}/payment/result?type=donation&status=cancelled&petId=${petId}`,
+    });
+
+    console.log(`[Donation] PayOS link created — orderCode: ${orderCode}, pet: ${pet.name}, amount: ${pet.donationAmount}`);
+    return res.status(201).json({ checkoutUrl: payosData.checkoutUrl });
+  } catch (err) {
+    console.error('[Donation] createAdoptionDonation error:', err.message, err.stack);
+    return res.status(500).json({ message: 'Lỗi khi tạo liên kết thanh toán.' });
+  }
+};
+
+// @desc  GET /api/donations/check?petId=xxx
+export const checkAdoptionDonation = async (req, res) => {
+  try {
+    const { petId } = req.query;
+    const donation  = await Donation.findOne({ petId, userId: req.user._id, type: 'adoption', status: 'paid' });
+    return res.status(200).json({ donated: !!donation });
+  } catch (err) {
+    console.error('[Donation] checkAdoptionDonation error:', err.message);
+    return res.status(500).json({ message: 'Lỗi kiểm tra.' });
+  }
+};
+
+// @desc  POST /api/donations/payos_webhook
+export const payosDonationWebhook = async (req, res) => {
+  try {
+    console.log('[Donation] Webhook received:', JSON.stringify(req.body).slice(0, 200));
+    const webhookData = await verifyWebhook(req.body);
+    const { orderCode, code } = webhookData;
+    const donation = await Donation.findOne({ payosOrderCode: orderCode });
+    if (donation && donation.status !== 'paid') {
+      donation.status = code === '00' ? 'paid' : 'failed';
+      donation.payosTransactionId = webhookData.reference || '';
+      await donation.save();
+    }
+    return res.status(200).json({ success: true });
+  } catch (err) {
+    console.error('donation webhook error:', err.message);
+    return res.status(200).json({ success: true });
+  }
+};
+
+// @desc  GET /api/donations/payos_return
+export const payosDonationReturn = async (req, res) => {
+  try {
+    const { code, status, orderCode, cancel } = req.query;
+    console.log(`[Donation] PayOS return — code:${code} status:${status} orderCode:${orderCode} cancel:${cancel}`);
+    const isPaid      = code === '00' && status === 'PAID';
+    const isCancelled = cancel === 'true' || status === 'CANCELLED';
+
+    let petId = '';
+    if (orderCode) {
+      const donation = await Donation.findOne({ payosOrderCode: Number(orderCode) });
+      if (donation) {
+        if (donation.status !== 'paid') {
+          donation.status = isPaid ? 'paid' : 'failed';
+          await donation.save();
+        }
+        petId = donation.petId?.toString() || '';
+      }
+    }
+
+    const s = isPaid ? 'success' : isCancelled ? 'cancelled' : 'failed';
+    return res.redirect(`${FE_BASE}/payment/result?type=donation&status=${s}&petId=${petId}`);
+  } catch (err) {
+    console.error('[Donation] payosDonationReturn error:', err.message);
+    return res.redirect(`${FE_BASE}/payment/result?type=donation&status=error`);
+  }
+};
+
+// @desc  GET /api/donations
 export const getDonations = async (req, res) => {
   try {
     const donations = await Donation.find()
       .populate('petId', 'name image breed status')
       .sort({ createdAt: -1 });
-
     return res.status(200).json(donations);
-  } catch (error) {
-    console.error('Get donations error:', error.message);
-    return res.status(500).json({ message: 'Lỗi máy chủ khi tải danh sách quyên góp.' });
+  } catch (err) {
+    console.error('[Donation] getDonations error:', err.message);
+    return res.status(500).json({ message: 'Lỗi máy chủ.' });
   }
 };

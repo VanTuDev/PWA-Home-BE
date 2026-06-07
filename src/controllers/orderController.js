@@ -1,9 +1,10 @@
 import Order from '../models/Order.js';
 import Product from '../models/Product.js';
-import { createPaymentUrl, verifyReturn, verifySignature } from '../services/vnpayService.js';
+import { createPaymentLink, verifyWebhook, isConfigured } from '../services/payosService.js';
 import { broadcastNewOrder } from '../services/socketService.js';
 
 const FE_BASE = process.env.FE_URL || 'http://localhost:3000';
+const BE_BASE = process.env.BE_URL || 'https://pwa-home-be.onrender.com';
 
 // @desc  POST /api/orders  — authenticated user
 export const createOrder = async (req, res) => {
@@ -15,7 +16,6 @@ export const createOrder = async (req, res) => {
       return res.status(400).json({ message: 'Vui lòng điền đầy đủ thông tin đơn hàng và địa chỉ giao hàng.' });
     }
 
-    // Batch fetch tất cả products trong 1 query thay vì N queries
     const productIds = items.map(i => i.productId);
     const products   = await Product.find({ _id: { $in: productIds } }).lean();
     const productMap = Object.fromEntries(products.map(p => [p._id.toString(), p]));
@@ -24,7 +24,7 @@ export const createOrder = async (req, res) => {
     const orderItems = [];
     for (const item of items) {
       const product = productMap[item.productId];
-      if (!product) return res.status(400).json({ message: `Sản phẩm không tồn tại.` });
+      if (!product) return res.status(400).json({ message: 'Sản phẩm không tồn tại.' });
       if (product.stock < item.quantity) return res.status(400).json({ message: `${product.name} không đủ hàng tồn kho.` });
 
       orderItems.push({
@@ -40,6 +40,9 @@ export const createOrder = async (req, res) => {
     const discount = paymentMethod === 'online' ? Math.round(subtotal * 0.1) : 0;
     const total    = subtotal - discount;
 
+    // orderCode là số nguyên dùng cho PayOS — dùng timestamp để unique
+    const payosOrderCode = Date.now();
+
     const order = await Order.create({
       userId,
       items:        orderItems,
@@ -49,35 +52,40 @@ export const createOrder = async (req, res) => {
       discount,
       total,
       note: note || '',
-      vnpayTxnRef: ''
+      payosOrderCode: paymentMethod === 'online' ? payosOrderCode : 0
     });
 
-    // Notify admin via socket
-    broadcastNewOrder({
-      orderId:     order._id,
-      customerName: shippingInfo.name,
-      total,
-      paymentMethod
-    });
+    broadcastNewOrder({ orderId: order._id, customerName: shippingInfo.name, total, paymentMethod });
 
     if (paymentMethod === 'online') {
-      const ipAddr   = (req.headers['x-forwarded-for'] || req.socket.remoteAddress || '127.0.0.1').split(',')[0].trim();
-      const orderInfo = `PAW Shop don hang ${order._id.toString().slice(-6)}`;
-      const paymentUrl = createPaymentUrl(order._id.toString(), total, orderInfo, ipAddr);
-
-      if (!paymentUrl) {
-        // VNPay chưa config → trả COD fallback
+      if (!isConfigured()) {
         return res.status(201).json({
           order,
-          warning: 'VNPay chưa được cấu hình. Đơn hàng tạm thời được đặt theo hình thức COD.',
+          warning: 'PayOS chưa được cấu hình. Đơn hàng tạm thời được đặt theo hình thức COD.',
           paymentUrl: null
         });
       }
 
-      order.vnpayTxnRef = order._id.toString();
-      await order.save();
+      const payosItems = orderItems.map(i => ({
+        name:     i.name.slice(0, 50),
+        quantity: i.quantity,
+        price:    i.price
+      }));
 
-      return res.status(201).json({ order, paymentUrl });
+      const description = `PAW ${order._id.toString().slice(-8).toUpperCase()}`;
+      const returnUrl   = `${BE_BASE}/api/orders/payos_return`;
+      const cancelUrl   = `${FE_BASE}/payment/result?status=cancelled&orderId=${order._id}`;
+
+      const payosData = await createPaymentLink({
+        orderCode:   payosOrderCode,
+        amount:      total,
+        description,
+        items:       payosItems,
+        returnUrl,
+        cancelUrl
+      });
+
+      return res.status(201).json({ order, paymentUrl: payosData.checkoutUrl });
     }
 
     return res.status(201).json({ order });
@@ -118,71 +126,69 @@ export const updateOrderStatus = async (req, res) => {
   }
 };
 
-// @desc  GET /api/orders/vnpay_ipn  — VNPay server-to-server IPN (ưu tiên hơn return URL)
-export const vnpayIpn = async (req, res) => {
+// @desc  POST /api/orders/payos_webhook  — PayOS server-to-server webhook
+export const payosWebhook = async (req, res) => {
   try {
-    const result = verifySignature(req.query);
-
-    // Chữ ký không hợp lệ
-    if (!result.isValid) {
-      return res.status(200).json({ RspCode: '97', Message: 'Invalid Signature' });
-    }
-
-    const order = await Order.findById(result.txnRef);
+    // verifyWebhook throws nếu chữ ký không hợp lệ
+    const webhookData = await verifyWebhook(req.body);
+    const { orderCode, code } = webhookData;
+    const order = await Order.findOne({ payosOrderCode: orderCode });
 
     if (!order) {
-      return res.status(200).json({ RspCode: '01', Message: 'Order not found' });
+      return res.status(200).json({ success: true }); // ack để PayOS không retry
     }
 
-    // Đơn đã xử lý trước đó
     if (order.paymentStatus === 'paid') {
-      return res.status(200).json({ RspCode: '02', Message: 'Order already confirmed' });
+      return res.status(200).json({ success: true });
     }
 
-    // Kiểm tra số tiền (VNPay trả về amount * 100)
-    const vnpAmount = parseInt(req.query.vnp_Amount || '0') / 100;
-    if (Math.abs(vnpAmount - order.total) > 1) {
-      return res.status(200).json({ RspCode: '04', Message: 'Invalid amount' });
-    }
-
-    if (result.responseCode === '00') {
-      order.paymentStatus    = 'paid';
-      order.orderStatus      = 'confirmed';
-      order.vnpayTransactionId = result.transactionId;
+    if (code === '00') {
+      order.paymentStatus      = 'paid';
+      order.orderStatus        = 'confirmed';
+      order.payosTransactionId = webhookData.reference || '';
     } else {
       order.paymentStatus = 'failed';
     }
 
     await order.save();
-    console.log(`[VNPay IPN] Order ${result.txnRef} → ${order.paymentStatus}`);
+    console.log(`[PayOS Webhook] orderCode=${orderCode} → ${order.paymentStatus}`);
 
-    return res.status(200).json({ RspCode: '00', Message: 'Confirm Success' });
+    return res.status(200).json({ success: true });
   } catch (error) {
-    console.error('VNPay IPN error:', error.message);
-    return res.status(200).json({ RspCode: '99', Message: 'Unknown error' });
+    console.error('PayOS webhook error:', error.message);
+    return res.status(200).json({ success: true }); // luôn ack để tránh retry loop
   }
 };
 
-// @desc  GET /api/orders/vnpay_return  — VNPay redirect customer về sau thanh toán
-export const vnpayReturn = async (req, res) => {
+// @desc  GET /api/orders/payos_return  — PayOS redirect khách hàng sau thanh toán
+export const payosReturn = async (req, res) => {
   try {
-    const result = verifyReturn(req.query);
-    const orderId = result.txnRef;
+    // PayOS trả về: code, id, cancel, status, orderCode
+    const { code, status, orderCode, cancel } = req.query;
 
-    if (result.success && orderId) {
-      const order = await Order.findById(orderId);
-      if (order) {
-        order.paymentStatus    = 'paid';
-        order.orderStatus      = 'confirmed';
-        order.vnpayTransactionId = result.transactionId;
+    const isCancelled = cancel === 'true' || status === 'CANCELLED';
+    const isPaid      = code === '00' && status === 'PAID';
+
+    if (orderCode) {
+      const order = await Order.findOne({ payosOrderCode: Number(orderCode) });
+      if (order && order.paymentStatus !== 'paid') {
+        if (isPaid) {
+          order.paymentStatus = 'paid';
+          order.orderStatus   = 'confirmed';
+        } else {
+          order.paymentStatus = 'failed';
+        }
         await order.save();
       }
+
+      const resultStatus = isPaid ? 'success' : isCancelled ? 'cancelled' : 'failed';
+      const orderId      = order?._id?.toString() || '';
+      return res.redirect(`${FE_BASE}/payment/result?status=${resultStatus}&orderId=${orderId}`);
     }
 
-    const status = result.success ? 'success' : 'failed';
-    return res.redirect(`${FE_BASE}/payment/result?status=${status}&orderId=${orderId || ''}`);
+    return res.redirect(`${FE_BASE}/payment/result?status=error`);
   } catch (error) {
-    console.error('VNPay return error:', error.message);
+    console.error('PayOS return error:', error.message);
     return res.redirect(`${FE_BASE}/payment/result?status=error`);
   }
 };
