@@ -1,7 +1,7 @@
 import express from 'express';
 import {
   createDonation, createAdoptionDonation, checkAdoptionDonation,
-  payosDonationWebhook, payosDonationReturn, getDonations
+  payosDonationWebhook, payosDonationReturn, getDonations, getMyDonations
 } from '../controllers/donationController.js';
 import { protect } from '../middlewares/authMiddleware.js';
 import jwt from 'jsonwebtoken';
@@ -27,6 +27,7 @@ router.post('/payos_webhook', payosDonationWebhook);
 // Adoption donation
 router.post('/adoption', protect, createAdoptionDonation);
 router.get( '/check',    protect, checkAdoptionDonation);
+router.get( '/my',       protect, getMyDonations);
 
 router.route('/')
   .post(optionalProtect, createDonation)

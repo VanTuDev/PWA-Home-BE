@@ -155,3 +155,16 @@ export const getDonations = async (req, res) => {
     return res.status(500).json({ message: 'Lỗi máy chủ.' });
   }
 };
+
+// @desc  GET /api/donations/my  — lịch sử thanh toán của user hiện tại
+export const getMyDonations = async (req, res) => {
+  try {
+    const donations = await Donation.find({ userId: req.user._id })
+      .populate('petId', 'name image breed status donationAmount')
+      .sort({ createdAt: -1 });
+    return res.status(200).json(donations);
+  } catch (err) {
+    console.error('[Donation] getMyDonations error:', err.message);
+    return res.status(500).json({ message: 'Lỗi máy chủ.' });
+  }
+};

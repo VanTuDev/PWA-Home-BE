@@ -87,9 +87,11 @@ export const updateUser = async (req, res) => {
     const user = await User.findById(req.params.id);
     if (!user) return res.status(404).json({ message: 'Không tìm thấy người dùng.' });
 
-    if (req.body.role)  user.role  = req.body.role;
-    if (req.body.name)  user.name  = req.body.name;
-    if (req.body.phone) user.phone = req.body.phone;
+    if (req.body.role   !== undefined) user.role   = req.body.role;
+    if (req.body.name   !== undefined) user.name   = req.body.name;
+    if (req.body.phone  !== undefined) user.phone  = req.body.phone;
+    if (req.body.salary !== undefined) user.salary = req.body.salary;
+    if (req.body.job    !== undefined) user.job    = req.body.job;
 
     await user.save();
     const { password, otp, ...userData } = user.toObject();

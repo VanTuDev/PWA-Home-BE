@@ -81,13 +81,14 @@ export const updateProduct = async (req, res) => {
     const product = await Product.findById(req.params.id);
     if (!product) return res.status(404).json({ message: 'Không tìm thấy sản phẩm.' });
 
-    const { name, description, category, price, stock, isNew, rating } = req.body;
+    const { name, description, category, price, stock, isNew, rating, soldCount } = req.body;
     if (name        !== undefined) product.name        = name;
     if (description !== undefined) product.description = description;
     if (category    !== undefined) product.category    = category;
     if (price       !== undefined) product.price       = Number(price);
     if (stock       !== undefined) product.stock       = Number(stock);
     if (rating      !== undefined) product.rating      = Number(rating);
+    if (soldCount   !== undefined) product.soldCount   = Number(soldCount);
     if (isNew       !== undefined) product.isNew       = isNew === 'true' || isNew === true;
     if (req.file)        product.image = fileUrl(req.file);
     else if (req.body.image) product.image = req.body.image;
