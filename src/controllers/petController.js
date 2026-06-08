@@ -252,12 +252,14 @@ export const updatePet = async (req, res) => {
     if (rescuePartner) pet.rescuePartner = rescuePartner;
     if (story) pet.story = story;
 
-    // Handle Image
+    // Handle Image — ưu tiên: file mới > URL text > giữ nguyên DB
     if (req.file) {
       pet.image = fileUrl(req.file);
-    } else if (req.body.image) {
+      console.log(`[Pet] Image updated via file upload: ${pet.image}`);
+    } else if (req.body.image && req.body.image.startsWith('http')) {
       pet.image = req.body.image;
     }
+    // Không có gì → pet.image giữ nguyên giá trị đang có trong DB
 
     // Handle Tags
     if (tags) {
