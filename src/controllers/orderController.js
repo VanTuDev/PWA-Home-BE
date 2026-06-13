@@ -2,6 +2,7 @@ import Order from '../models/Order.js';
 import Product from '../models/Product.js';
 import { createPaymentLink, verifyWebhook, isConfigured } from '../services/payosService.js';
 import { broadcastNewOrder } from '../services/socketService.js';
+import { createNotification } from './notificationController.js';
 
 const FE_BASE = process.env.FE_URL || 'http://localhost:3000';
 const BE_BASE = process.env.BE_URL || 'https://pwa-home-be.onrender.com';
@@ -120,6 +121,21 @@ export const updateOrderStatus = async (req, res) => {
 
     order.orderStatus = orderStatus;
     await order.save();
+
+    // Notify user
+    if (order.userId) {
+      const statusMap = {
+        Confirmed:  { title: '✅ Đơn hàng đã được xác nhận', body: `Đơn hàng #${order._id.toString().slice(-6).toUpperCase()} của bạn đã được xác nhận và đang chuẩn bị.` },
+        Shipping:   { title: '🚚 Đơn hàng đang được giao', body: `Đơn hàng #${order._id.toString().slice(-6).toUpperCase()} đang trên đường đến bạn!` },
+        Delivered:  { title: '🎁 Đơn hàng đã giao thành công', body: `Đơn hàng #${order._id.toString().slice(-6).toUpperCase()} đã được giao. Cảm ơn bạn đã mua hàng!` },
+        Cancelled:  { title: '❌ Đơn hàng bị huỷ', body: `Đơn hàng #${order._id.toString().slice(-6).toUpperCase()} đã bị huỷ.` },
+      };
+      const notif = statusMap[orderStatus];
+      if (notif) {
+        await createNotification({ userId: order.userId, type: 'order', title: notif.title, body: notif.body, link: '/history' });
+      }
+    }
+
     return res.status(200).json(order);
   } catch (error) {
     return res.status(500).json({ message: 'Lỗi khi cập nhật trạng thái đơn hàng.' });

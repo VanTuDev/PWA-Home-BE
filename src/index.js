@@ -17,8 +17,10 @@ import orderRoutes from './routes/orderRoutes.js';
 import adoptionRoutes from './routes/adoptionRoutes.js';
 import donationRoutes from './routes/donationRoutes.js';
 import communityRoutes from './routes/communityRoutes.js';
-import adminRoutes from './routes/adminRoutes.js';
-import chatRoutes  from './routes/chatRoutes.js';
+import adminRoutes        from './routes/adminRoutes.js';
+import chatRoutes         from './routes/chatRoutes.js';
+import notificationRoutes from './routes/notificationRoutes.js';
+import { startTaskWarningCron } from './services/taskWarningService.js';
 
 dotenv.config();
 
@@ -140,7 +142,11 @@ const startServer = async () => {
   app.use('/api/donations', donationRoutes);
   app.use('/api/posts',     communityRoutes);
   app.use('/api/admin',     adminRoutes);
-  app.use('/api/chat',      chatRoutes);
+  app.use('/api/chat',          chatRoutes);
+  app.use('/api/notifications', notificationRoutes);
+
+  // Start cron jobs
+  startTaskWarningCron();
 
   // Health check — cron-job.org ping mỗi 10 phút để Render không ngủ
   const healthHandler = (req, res) => res.json({ status: 'ok', ts: Date.now() });

@@ -148,6 +148,7 @@ export const getDonations = async (req, res) => {
   try {
     const donations = await Donation.find()
       .populate('petId', 'name image breed status')
+      .populate('userId', 'name email avatar')
       .sort({ createdAt: -1 });
     return res.status(200).json(donations);
   } catch (err) {

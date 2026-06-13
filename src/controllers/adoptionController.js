@@ -1,6 +1,44 @@
 import Adoption from '../models/Adoption.js';
 import Pet from '../models/Pet.js';
 import Donation from '../models/Donation.js';
+import { createNotification } from './notificationController.js';
+
+// @desc  GET /api/adoptions/my-tasks
+// @access Private (user)
+export const getMyTasks = async (req, res) => {
+  try {
+    const adoptions = await Adoption.find({
+      userId: req.user._id,
+      status: { $in: ['Approved', 'FollowUp'] }
+    }).populate('petId', 'name image breed');
+
+    const tasks = adoptions.map(a => {
+      const reports   = a.trackingReports || [];
+      const doneWeeks = new Set(reports.map(r => r.weekNumber));
+      const weeks     = [1, 2, 3, 4].map(w => ({
+        weekNumber: w,
+        done: doneWeeks.has(w),
+        report: reports.find(r => r.weekNumber === w) || null,
+      }));
+      // current active week = first undone, max 4
+      const currentWeek = weeks.find(w => !w.done)?.weekNumber ?? null;
+      return {
+        adoptionId: a.id,
+        pet: a.petId,
+        status: a.status,
+        submittedAt: a.submittedAt,
+        weeks,
+        currentWeek,
+        completedCount: doneWeeks.size,
+      };
+    });
+
+    return res.status(200).json(tasks);
+  } catch (err) {
+    console.error('[Tasks] getMyTasks error:', err.message);
+    return res.status(500).json({ message: 'Lỗi máy chủ.' });
+  }
+};
 
 // @desc    Create a new adoption application
 // @route   POST /api/adoptions
@@ -86,7 +124,7 @@ export const getAdoptions = async (req, res) => {
     if (['admin', 'manager', 'staff'].includes(req.user.role)) {
       adoptions = await Adoption.find()
         .populate('petId')
-        .populate('userId', 'name email phone')
+        .populate('userId', 'name email phone avatar')
         .sort({ submittedAt: -1 });
     } else {
       // Regular user sees only their own applications
@@ -120,16 +158,35 @@ export const updateAdoptionStatus = async (req, res) => {
     adoption.status = status;
     await adoption.save();
 
-    // If approved, update the pet's status to 'Adopted'
+    // Update pet status
     if (status === 'Approved') {
       await Pet.findByIdAndUpdate(adoption.petId, { status: 'Adopted' });
     } else {
-      // If changed back from approved, make pet ready again
       const currentPet = await Pet.findById(adoption.petId);
       if (currentPet && currentPet.status === 'Adopted' && status !== 'Approved') {
         currentPet.status = 'Ready';
         await currentPet.save();
       }
+    }
+
+    // Send notification to user
+    const petInfo = await Pet.findById(adoption.petId).select('name');
+    const petName = petInfo?.name || 'thú cưng';
+    const notifMap = {
+      Approved: { title: '🎉 Đơn nhận nuôi được chấp nhận!', body: `Chúc mừng! Đơn nhận nuôi bé ${petName} của bạn đã được phê duyệt. Chúng tôi sẽ liên hệ sớm.` },
+      Rejected: { title: '❌ Đơn nhận nuôi bị từ chối', body: `Rất tiếc, đơn nhận nuôi bé ${petName} chưa được chấp thuận lần này. Bạn có thể thử lại sau.` },
+      FollowUp: { title: '🔍 Đơn nhận nuôi cần xem xét thêm', body: `Đơn nhận nuôi bé ${petName} đang được xem xét thêm. Vui lòng chờ liên hệ từ chúng tôi.` },
+      Pending:  { title: '⏳ Đơn nhận nuôi đang chờ duyệt', body: `Đơn nhận nuôi bé ${petName} đang được xử lý.` },
+    };
+    const notif = notifMap[status];
+    if (notif) {
+      await createNotification({
+        userId: adoption.userId,
+        type: 'adoption',
+        title: notif.title,
+        body: notif.body,
+        link: '/history',
+      });
     }
 
     return res.status(200).json({

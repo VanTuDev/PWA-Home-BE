@@ -1,5 +1,6 @@
 import mongoose from 'mongoose';
 import Post from '../models/Post.js';
+import Adoption from '../models/Adoption.js';
 
 const fileUrl = (f) => !f ? '' : f.path?.startsWith('http') ? f.path : `/uploads/${f.filename}`;
 
@@ -42,12 +43,40 @@ export const createPost = async (req, res) => {
     const post = await Post.create({
       userId:         u._id,
       authorName:     u.name,
-      authorAvatar:   `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(u.name)}`,
+      authorAvatar:   u.avatar || `https://api.dicebear.com/7.x/initials/svg?seed=${encodeURIComponent(u.name)}`,
       authorIsExpert: ['admin', 'manager'].includes(u.role),
       content: content.trim(),
       image
     });
-    return res.status(201).json(toDTO(post, u._id));
+
+    // Auto-submit tracking report nếu user có adoption đang Approved/FollowUp và post có ảnh
+    let completedTask = null;
+    if (image) {
+      try {
+        const adoption = await Adoption.findOne({
+          userId: u._id,
+          status: { $in: ['Approved', 'FollowUp'] },
+        });
+        if (adoption) {
+          const doneWeeks = new Set((adoption.trackingReports || []).map(r => r.weekNumber));
+          const nextWeek  = [1, 2, 3, 4].find(w => !doneWeeks.has(w));
+          if (nextWeek) {
+            adoption.trackingReports.push({
+              weekNumber: nextWeek,
+              image,
+              comment: content.trim().slice(0, 200),
+              submittedAt: new Date(),
+            });
+            await adoption.save();
+            completedTask = { adoptionId: adoption.id, weekNumber: nextWeek };
+          }
+        }
+      } catch (e) {
+        console.warn('[Task] Auto-tracking failed (non-fatal):', e.message);
+      }
+    }
+
+    return res.status(201).json({ ...toDTO(post, u._id), completedTask });
   } catch (err) {
     console.error('createPost:', err.message);
     return res.status(500).json({ message: 'Lỗi khi đăng bài.' });
