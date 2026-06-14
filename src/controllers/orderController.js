@@ -4,8 +4,9 @@ import { createPaymentLink, verifyWebhook, isConfigured } from '../services/payo
 import { broadcastNewOrder } from '../services/socketService.js';
 import { createNotification } from './notificationController.js';
 
-const FE_BASE = process.env.FE_URL || 'http://localhost:3000';
-const BE_BASE = process.env.BE_URL || 'https://pwa-home-be.onrender.com';
+const isDev   = process.env.NODE_ENV !== 'production';
+const FE_BASE = isDev ? `http://localhost:${process.env.FE_PORT || 3000}` : (process.env.FE_URL || 'http://localhost:3000');
+const BE_BASE = isDev ? `http://localhost:${process.env.PORT || 5000}`    : (process.env.BE_URL || 'https://pwa-home-be.onrender.com');
 
 // @desc  POST /api/orders  — authenticated user
 export const createOrder = async (req, res) => {
