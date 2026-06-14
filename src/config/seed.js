@@ -18,10 +18,10 @@ const seedDB = async () => {
 
     await User.deleteMany({});
 
-    const salt   = await bcrypt.genSalt(10);
+    const salt = await bcrypt.genSalt(10);
     const hashed = await bcrypt.hash(process.env.ADMIN_PASSWORD || 'Vantu16022003@', salt);
     await User.create({
-      name:  'Vân Tú - Admin',
+      name: ' Admin',
       email: (process.env.ADMIN_EMAIL || 'Vantu.dev@gmail.com').toLowerCase(),
       password: hashed,
       phone: '0988888888',

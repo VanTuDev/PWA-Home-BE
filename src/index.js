@@ -17,8 +17,8 @@ import orderRoutes from './routes/orderRoutes.js';
 import adoptionRoutes from './routes/adoptionRoutes.js';
 import donationRoutes from './routes/donationRoutes.js';
 import communityRoutes from './routes/communityRoutes.js';
-import adminRoutes        from './routes/adminRoutes.js';
-import chatRoutes         from './routes/chatRoutes.js';
+import adminRoutes from './routes/adminRoutes.js';
+import chatRoutes from './routes/chatRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import { startTaskWarningCron } from './services/taskWarningService.js';
 
@@ -91,14 +91,14 @@ const startServer = async () => {
   // Đảm bảo tài khoản admin luôn tồn tại và có thể login
   try {
     const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || 'Vantu.dev@gmail.com').toLowerCase();
-    const ADMIN_PASS  = process.env.ADMIN_PASSWORD || 'Vantu16022003@';
-    const existing    = await User.findOne({ email: ADMIN_EMAIL });
+    const ADMIN_PASS = process.env.ADMIN_PASSWORD || 'Vantu16022003@';
+    const existing = await User.findOne({ email: ADMIN_EMAIL });
 
     if (!existing) {
-      const salt   = await bcrypt.genSalt(10);
+      const salt = await bcrypt.genSalt(10);
       const hashed = await bcrypt.hash(ADMIN_PASS, salt);
       await User.create({
-        name: 'Vân Tú - Admin', email: ADMIN_EMAIL,
+        name: ' Admin', email: ADMIN_EMAIL,
         password: hashed, phone: '0988888888', role: 'admin'
       });
       console.log(`[Init] Created admin: ${ADMIN_EMAIL}`);
@@ -121,7 +121,7 @@ const startServer = async () => {
     console.error('[Init] Cannot ensure admin:', err.message);
   }
 
-  const app    = express();
+  const app = express();
   const server = http.createServer(app);
 
   app.use(cors(corsOptions));
@@ -134,15 +134,15 @@ const startServer = async () => {
   app.use('/uploads', express.static(uploadsDir));
 
   // Routes
-  app.use('/api/auth',      authRoutes);
-  app.use('/api/pets',      petRoutes);
-  app.use('/api/products',  productRoutes);
-  app.use('/api/orders',    orderRoutes);
+  app.use('/api/auth', authRoutes);
+  app.use('/api/pets', petRoutes);
+  app.use('/api/products', productRoutes);
+  app.use('/api/orders', orderRoutes);
   app.use('/api/adoptions', adoptionRoutes);
   app.use('/api/donations', donationRoutes);
-  app.use('/api/posts',     communityRoutes);
-  app.use('/api/admin',     adminRoutes);
-  app.use('/api/chat',          chatRoutes);
+  app.use('/api/posts', communityRoutes);
+  app.use('/api/admin', adminRoutes);
+  app.use('/api/chat', chatRoutes);
   app.use('/api/notifications', notificationRoutes);
 
   // Start cron jobs

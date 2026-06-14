@@ -11,6 +11,7 @@ const donationSchema = new mongoose.Schema({
   status:     { type: String, enum: ['pending', 'paid', 'failed'], default: 'paid' },
   payosOrderCode:     { type: Number, default: 0 },
   payosTransactionId: { type: String, default: '' },
+  billImage:          { type: String, default: '' },
 }, { timestamps: true });
 
 donationSchema.virtual('id').get(function () { return this._id.toHexString(); });
