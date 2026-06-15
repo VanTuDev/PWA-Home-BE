@@ -20,6 +20,7 @@ import communityRoutes from './routes/communityRoutes.js';
 import adminRoutes from './routes/adminRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
+import settingRoutes from './routes/settingRoutes.js';
 import { startTaskWarningCron } from './services/taskWarningService.js';
 
 dotenv.config();
@@ -144,6 +145,7 @@ const startServer = async () => {
   app.use('/api/admin', adminRoutes);
   app.use('/api/chat', chatRoutes);
   app.use('/api/notifications', notificationRoutes);
+  app.use('/api/settings', settingRoutes);
 
   // Start cron jobs
   startTaskWarningCron();
