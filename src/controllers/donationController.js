@@ -6,11 +6,13 @@ const isDev   = process.env.NODE_ENV !== 'production';
 const FE_BASE = isDev ? `http://localhost:${process.env.FE_PORT || 3000}` : (process.env.FE_URL || 'http://localhost:3000');
 const BE_BASE = isDev ? `http://localhost:${process.env.PORT || 5000}`    : (process.env.BE_URL || 'https://pwa-home-be.onrender.com');
 
-// @desc  POST /api/donations  — general donation (ghi nhận ngay)
+// @desc  POST /api/donations  — general donation
+// Nếu có billImage → status 'pending' (chờ admin duyệt)
+// Không có billImage → status 'paid' (ghi nhận ngay, backwards compat)
 export const createDonation = async (req, res) => {
   try {
-    const { petId, amount, donorName, message } = req.body;
-    if (!amount || amount <= 0)
+    const { petId, amount, donorName, donorEmail, message, billImage } = req.body;
+    if (!amount || parseFloat(amount) <= 0)
       return res.status(400).json({ message: 'Vui lòng cung cấp số tiền quyên góp hợp lệ.' });
 
     const userId    = req.user?._id || null;
@@ -21,16 +23,48 @@ export const createDonation = async (req, res) => {
       if (!pet) return res.status(404).json({ message: 'Không tìm thấy bé thú cưng.' });
     }
 
+    // Có bill → pending (chờ admin duyệt); không có bill → paid ngay
+    const status = billImage ? 'pending' : 'paid';
+
     const donation = await Donation.create({
-      petId: petId || null, userId, donorName: finalName,
-      amount: parseFloat(amount), message: message || '',
-      type: 'general', status: 'paid',
+      petId: petId || null,
+      userId,
+      donorName:  finalName,
+      donorEmail: donorEmail || req.user?.email || '',
+      amount:     parseFloat(amount),
+      message:    message || '',
+      billImage:  billImage || '',
+      type:       'general',
+      status,
     });
 
-    return res.status(201).json({ message: 'Cảm ơn tấm lòng của bạn!', donation });
+    const msg = status === 'pending'
+      ? 'Đã ghi nhận ủng hộ! Chúng tôi sẽ xét duyệt bill và xác nhận sớm nhất.'
+      : 'Cảm ơn tấm lòng của bạn!';
+
+    return res.status(201).json({ message: msg, donation });
   } catch (err) {
     console.error('createDonation error:', err.message);
     return res.status(500).json({ message: 'Lỗi máy chủ khi xử lý quyên góp.' });
+  }
+};
+
+// @desc  PATCH /api/donations/:id/approve  — admin duyệt donation
+export const approveDonation = async (req, res) => {
+  try {
+    const donation = await Donation.findById(req.params.id);
+    if (!donation) return res.status(404).json({ message: 'Không tìm thấy giao dịch.' });
+    if (donation.status === 'paid')
+      return res.status(400).json({ message: 'Giao dịch này đã được duyệt rồi.' });
+
+    donation.status = 'paid';
+    await donation.save();
+
+    console.log(`[Donation] Approved: ${donation._id} — ${donation.donorName} — ${donation.amount}`);
+    return res.status(200).json(donation);
+  } catch (err) {
+    console.error('[Donation] approveDonation error:', err.message);
+    return res.status(500).json({ message: 'Lỗi máy chủ.' });
   }
 };
 

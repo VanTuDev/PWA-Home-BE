@@ -2,8 +2,9 @@ import express from 'express';
 import {
   createDonation, createAdoptionDonation, checkAdoptionDonation,
   payosDonationWebhook, payosDonationReturn, getDonations, getMyDonations,
-  createSystemDonation, uploadBillImage,
+  createSystemDonation, uploadBillImage, approveDonation,
 } from '../controllers/donationController.js';
+import { authorize } from '../middlewares/authMiddleware.js';
 import { protect } from '../middlewares/authMiddleware.js';
 import jwt from 'jsonwebtoken';
 import User from '../models/User.js';
@@ -31,7 +32,8 @@ router.get( '/check',    protect, checkAdoptionDonation);
 router.get( '/my',       protect, getMyDonations);
 
 router.post('/system', optionalProtect, createSystemDonation);
-router.patch('/:id/bill', optionalProtect, uploadBillImage);
+router.patch('/:id/bill',    optionalProtect, uploadBillImage);
+router.patch('/:id/approve', protect, authorize('admin', 'manager', 'staff'), approveDonation);
 
 router.route('/')
   .post(optionalProtect, createDonation)
