@@ -69,6 +69,10 @@ const adoptionSchema = new mongoose.Schema({
     enum: ['Pending', 'Approved', 'Rejected', 'FollowUp'],
     default: 'Pending'
   },
+  approvedAt: {
+    type: Date,
+    default: null
+  },
   deliveryOption: {
     type: String,
     enum: ['pickup', 'shipping'],

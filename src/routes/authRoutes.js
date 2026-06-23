@@ -1,5 +1,5 @@
 import express from 'express';
-import { register, login, getProfile, updateProfile, changePassword } from '../controllers/authController.js';
+import { register, login, getProfile, updateProfile, changePassword, forgotPassword, resetPassword } from '../controllers/authController.js';
 import { protect } from '../middlewares/authMiddleware.js';
 import { withUploadFields } from '../middlewares/uploadWrapper.js';
 
@@ -11,6 +11,8 @@ router.post('/register', withUploadFields([
 ]), register);
 
 router.post('/login',            login);
+router.post('/forgot-password',  forgotPassword);
+router.post('/reset-password',   resetPassword);
 router.put('/change-password',   protect, changePassword);
 router.get('/profile',           protect, getProfile);
 router.put('/profile',           protect, withUploadFields([

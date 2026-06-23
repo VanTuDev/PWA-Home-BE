@@ -1,5 +1,6 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import crypto from 'crypto';
 import User from '../models/User.js';
 
 const generateToken = (id) =>
@@ -200,6 +201,71 @@ export const changePassword = async (req, res) => {
     return res.status(200).json({ message: 'Đổi mật khẩu thành công!' });
   } catch (err) {
     console.error('[Auth] changePassword error:', err.message);
+    return res.status(500).json({ message: 'Lỗi máy chủ.' });
+  }
+};
+
+// @route   POST /api/auth/forgot-password
+// @access  Public — Web demo: chỉ cần email đúng là đặt lại ngay, không cần gửi mail
+export const forgotPassword = async (req, res) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ message: 'Vui lòng cung cấp email.' });
+
+    const user = await User.findOne({ email: email.toLowerCase().trim() });
+    if (!user) {
+      return res.status(404).json({ message: 'Không tìm thấy tài khoản với email này.' });
+    }
+
+    // Tạo token ngẫu nhiên (hex 32 bytes), hết hạn sau 1 giờ
+    const token  = crypto.randomBytes(32).toString('hex');
+    const expiry = new Date(Date.now() + 60 * 60 * 1000);
+
+    user.resetToken       = token;
+    user.resetTokenExpiry = expiry;
+    await user.save();
+
+    console.log(`[Auth] Reset token created for ${user.email}`);
+    return res.status(200).json({ token }); // trả token thẳng về FE
+  } catch (err) {
+    console.error('[Auth] forgotPassword error:', err.message);
+    return res.status(500).json({ message: 'Lỗi máy chủ.' });
+  }
+};
+
+// @route   POST /api/auth/reset-password
+// @access  Public
+export const resetPassword = async (req, res) => {
+  try {
+    const { token, newPassword } = req.body;
+    if (!token || !newPassword) {
+      return res.status(400).json({ message: 'Thiếu token hoặc mật khẩu mới.' });
+    }
+    if (newPassword.length < 6) {
+      return res.status(400).json({ message: 'Mật khẩu phải có ít nhất 6 ký tự.' });
+    }
+
+    const user = await User.findOne({
+      resetToken:       token,
+      resetTokenExpiry: { $gt: new Date() }, // chưa hết hạn
+    });
+
+    if (!user) {
+      return res.status(400).json({
+        message: 'Liên kết đặt lại không hợp lệ hoặc đã hết hạn. Vui lòng yêu cầu lại.',
+      });
+    }
+
+    const salt = await bcrypt.genSalt(10);
+    user.password         = await bcrypt.hash(newPassword, salt);
+    user.resetToken       = null;
+    user.resetTokenExpiry = null;
+    await user.save();
+
+    console.log(`[Auth] Password reset success for ${user.email}`);
+    return res.status(200).json({ message: 'Đặt lại mật khẩu thành công! Vui lòng đăng nhập.' });
+  } catch (err) {
+    console.error('[Auth] resetPassword error:', err.message);
     return res.status(500).json({ message: 'Lỗi máy chủ.' });
   }
 };

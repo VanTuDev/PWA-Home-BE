@@ -14,6 +14,9 @@ const userSchema = new mongoose.Schema({
   coverPhoto: { type: String, default: '' },
   cccdFront:  { type: String, default: '' },
   cccdBack:   { type: String, default: '' },
+  // Password reset
+  resetToken:       { type: String, default: null },
+  resetTokenExpiry: { type: Date,   default: null },
 }, { timestamps: true });
 
 export default mongoose.model('User', userSchema);

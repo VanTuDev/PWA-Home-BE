@@ -12,6 +12,8 @@ export const getMyTasks = async (req, res) => {
       status: { $in: ['Approved', 'FollowUp'] }
     }).populate('petId', 'name image breed');
 
+    const DAY_MS = 24 * 60 * 60 * 1000;
+
     const tasks = adoptions.map(a => {
       const reports   = a.trackingReports || [];
       const doneWeeks = new Set(reports.map(r => r.weekNumber));
@@ -20,15 +22,27 @@ export const getMyTasks = async (req, res) => {
         done: doneWeeks.has(w),
         report: reports.find(r => r.weekNumber === w) || null,
       }));
-      // current active week = first undone, max 4
-      const currentWeek = weeks.find(w => !w.done)?.weekNumber ?? null;
+
+      // Tính tuần hiện tại dựa vào approvedAt (ưu tiên) hoặc updatedAt
+      const baseDate  = a.approvedAt || a.updatedAt || a.submittedAt;
+      const daysSince = (Date.now() - new Date(baseDate).getTime()) / DAY_MS;
+      const expectedWeek = Math.min(4, Math.floor(daysSince / 7) + 1);
+
+      // Tuần đang hoạt động = tuần kỳ vọng chưa hoàn thành, tối thiểu tuần 1
+      const currentWeek = Math.min(
+        expectedWeek,
+        weeks.find(w => !w.done)?.weekNumber ?? 4
+      );
+
       return {
-        adoptionId: a.id,
-        pet: a.petId,
-        status: a.status,
-        submittedAt: a.submittedAt,
+        adoptionId:     a.id,
+        pet:            a.petId,
+        status:         a.status,
+        approvedAt:     baseDate,
+        submittedAt:    a.submittedAt,
         weeks,
         currentWeek,
+        expectedWeek,
         completedCount: doneWeeks.size,
       };
     });
@@ -159,6 +173,12 @@ export const updateAdoptionStatus = async (req, res) => {
     }
 
     adoption.status = status;
+
+    // Ghi lại thời điểm phê duyệt để tính tuần nhiệm vụ chính xác
+    if (status === 'Approved' && !adoption.approvedAt) {
+      adoption.approvedAt = new Date();
+    }
+
     await adoption.save();
 
     // Update pet status
@@ -176,10 +196,13 @@ export const updateAdoptionStatus = async (req, res) => {
     const petInfo = await Pet.findById(adoption.petId).select('name');
     const petName = petInfo?.name || 'thú cưng';
     const notifMap = {
-      Approved: { title: '🎉 Đơn nhận nuôi được chấp nhận!', body: `Chúc mừng! Đơn nhận nuôi bé ${petName} của bạn đã được phê duyệt. Chúng tôi sẽ liên hệ sớm.` },
-      Rejected: { title: '❌ Đơn nhận nuôi bị từ chối', body: `Rất tiếc, đơn nhận nuôi bé ${petName} chưa được chấp thuận lần này. Bạn có thể thử lại sau.` },
-      FollowUp: { title: '🔍 Đơn nhận nuôi cần xem xét thêm', body: `Đơn nhận nuôi bé ${petName} đang được xem xét thêm. Vui lòng chờ liên hệ từ chúng tôi.` },
-      Pending:  { title: '⏳ Đơn nhận nuôi đang chờ duyệt', body: `Đơn nhận nuôi bé ${petName} đang được xử lý.` },
+      Approved: {
+        title: '🎉 Đơn nhận nuôi được chấp nhận!',
+        body: `Chúc mừng! Đơn nhận nuôi bé ${petName} đã được phê duyệt. Nhiệm vụ 4 tuần chụp ảnh cập nhật đã bắt đầu — hãy vào mục Nhiệm vụ để hoàn thành nhé!`,
+      },
+      Rejected: { title: '❌ Đơn nhận nuôi bị từ chối',    body: `Rất tiếc, đơn nhận nuôi bé ${petName} chưa được chấp thuận lần này.` },
+      FollowUp: { title: '🔍 Đơn nhận nuôi cần xem xét thêm', body: `Đơn nhận nuôi bé ${petName} đang được xem xét thêm.` },
+      Pending:  { title: '⏳ Đơn nhận nuôi đang chờ duyệt',   body: `Đơn nhận nuôi bé ${petName} đang được xử lý.` },
     };
     const notif = notifMap[status];
     if (notif) {
@@ -192,60 +215,82 @@ export const updateAdoptionStatus = async (req, res) => {
       });
     }
 
-    return res.status(200).json({
-      message: 'Cập nhật trạng thái đơn thành công.',
-      adoption
-    });
+    return res.status(200).json({ message: 'Cập nhật trạng thái đơn thành công.', adoption });
   } catch (error) {
     console.error('Update adoption status error:', error.message);
     return res.status(500).json({ message: 'Lỗi máy chủ khi duyệt đơn nhận nuôi.' });
   }
 };
 
-// @desc    Add weekly tracking report with photo
+// @desc    Add weekly tracking report with photo (upload ảnh trực tiếp, không cần đăng cộng đồng)
 // @route   POST /api/adoptions/:id/tracking
 // @access  Private
 export const addTrackingReport = async (req, res) => {
   try {
-    const { weekNumber, comment } = req.body;
     const adoptionId = req.params.id;
-
-    if (!weekNumber) {
-      return res.status(400).json({ message: 'Thiếu chỉ số tuần của báo cáo.' });
-    }
+    const { comment } = req.body;
 
     const adoption = await Adoption.findById(adoptionId);
     if (!adoption) {
       return res.status(404).json({ message: 'Không tìm thấy hợp đồng nhận nuôi phù hợp.' });
     }
 
-    // Check if the user is authorized (must be owner or staff)
-    if (adoption.userId.toString() !== req.user._id.toString() && !['admin', 'manager', 'staff'].includes(req.user.role)) {
+    // Chỉ chủ nhân hoặc staff được nộp báo cáo
+    if (adoption.userId.toString() !== req.user._id.toString() &&
+        !['admin', 'manager', 'staff'].includes(req.user.role)) {
       return res.status(403).json({ message: 'Bạn không có quyền đăng tải báo cáo cho hợp đồng này.' });
     }
 
+    // Tự động tính tuần hiện tại từ approvedAt
+    const DAY_MS   = 24 * 60 * 60 * 1000;
+    const baseDate = adoption.approvedAt || adoption.updatedAt || adoption.submittedAt;
+    const daysSince = (Date.now() - new Date(baseDate).getTime()) / DAY_MS;
+    const autoWeek  = Math.min(4, Math.floor(daysSince / 7) + 1);
+
+    // weekNumber từ body (nếu có), không thì dùng tự động
+    let weekNumber = req.body.weekNumber ? parseInt(req.body.weekNumber) : autoWeek;
+    if (weekNumber < 1 || weekNumber > 4) weekNumber = autoWeek;
+
+    // Kiểm tra tuần này đã nộp chưa
+    const alreadyDone = adoption.trackingReports.some(r => r.weekNumber === weekNumber);
+    if (alreadyDone) {
+      return res.status(400).json({ message: `Tuần ${weekNumber} đã được nộp báo cáo rồi.` });
+    }
+
+    // Lấy ảnh
     let image = '';
     if (req.file) {
-      image = `/uploads/${req.file.filename}`;
+      image = req.file.path?.startsWith('http') ? req.file.path : `/uploads/${req.file.filename}`;
     } else if (req.body.image) {
       image = req.body.image;
     } else {
       return res.status(400).json({ message: 'Vui lòng cung cấp hình ảnh báo cáo tình hình bé.' });
     }
 
-    const newReport = {
-      weekNumber: parseInt(weekNumber),
+    adoption.trackingReports.push({
+      weekNumber,
       image,
       comment: comment || '',
-      submittedAt: new Date()
-    };
-
-    adoption.trackingReports.push(newReport);
+      submittedAt: new Date(),
+    });
     await adoption.save();
 
+    // Gửi thông báo hoàn thành nhiệm vụ
+    const pet = await Pet.findById(adoption.petId).select('name');
+    const completedCount = adoption.trackingReports.length;
+    await createNotification({
+      userId: adoption.userId,
+      type: 'system',
+      title: `✅ Hoàn thành nhiệm vụ Tuần ${weekNumber}!`,
+      body: completedCount < 4
+        ? `Tuyệt vời! Bạn đã nộp ảnh tuần ${weekNumber} cho bé ${pet?.name || 'thú cưng'}. Còn ${4 - completedCount} tuần nữa nhé!`
+        : `🎉 Xuất sắc! Bạn đã hoàn thành cả 4 tuần theo dõi cho bé ${pet?.name || 'thú cưng'}. Cảm ơn bạn rất nhiều!`,
+      link: '/history',
+    });
+
     return res.status(200).json({
-      message: 'Đăng tải báo cáo tuần thành công. Cảm ơn bạn đã cập nhật tình hình bé!',
-      adoption
+      message: `Nộp báo cáo Tuần ${weekNumber} thành công! Cảm ơn bạn đã cập nhật tình hình bé.`,
+      adoption,
     });
   } catch (error) {
     console.error('Add tracking report error:', error.message);
