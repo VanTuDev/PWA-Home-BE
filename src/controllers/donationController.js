@@ -68,10 +68,10 @@ export const approveDonation = async (req, res) => {
   }
 };
 
-// @desc  POST /api/donations/adoption  — donation bắt buộc trước khi nhận nuôi (qua PayOS)
+// @desc  POST /api/donations/adoption  — donation bắt buộc trước khi nhận nuôi (qua PayOS hoặc tiền mặt)
 export const createAdoptionDonation = async (req, res) => {
   try {
-    const { petId } = req.body;
+    const { petId, paymentMethod = 'online' } = req.body;
     if (!petId) return res.status(400).json({ message: 'Thiếu petId.' });
 
     const pet = await Pet.findById(petId);
@@ -81,10 +81,29 @@ export const createAdoptionDonation = async (req, res) => {
 
     const userId = req.user._id;
 
-    // Đã donate thành công trước đó → báo ngay
+    // Đã donate thành công (online hoặc admin đã duyệt cash) → báo ngay
     const existing = await Donation.findOne({ petId, userId, type: 'adoption', status: 'paid' });
     if (existing) return res.status(200).json({ alreadyDonated: true });
 
+    // Đã đăng ký tiền mặt trước đó (chưa được duyệt) → báo trạng thái chờ
+    if (paymentMethod === 'cash') {
+      const existingCash = await Donation.findOne({ petId, userId, type: 'adoption', paymentMethod: 'cash', status: 'pending' });
+      if (existingCash) return res.status(200).json({ cashPending: true });
+
+      await Donation.create({
+        petId, userId,
+        donorName:  req.user.name,
+        donorEmail: req.user.email || '',
+        amount:     pet.donationAmount,
+        type:       'adoption',
+        status:     'pending',
+        paymentMethod: 'cash',
+      });
+      console.log(`[Donation] Cash adoption created — pet: ${pet.name}, user: ${req.user.name}, amount: ${pet.donationAmount}`);
+      return res.status(201).json({ cashPending: true });
+    }
+
+    // Online payment via PayOS
     const orderCode = Date.now();
     await Donation.create({
       petId, userId,
@@ -93,6 +112,7 @@ export const createAdoptionDonation = async (req, res) => {
       amount:     pet.donationAmount,
       type:       'adoption',
       status:     'pending',
+      paymentMethod: 'online',
       payosOrderCode: orderCode,
     });
 
@@ -123,8 +143,14 @@ export const createAdoptionDonation = async (req, res) => {
 export const checkAdoptionDonation = async (req, res) => {
   try {
     const { petId } = req.query;
-    const donation  = await Donation.findOne({ petId, userId: req.user._id, type: 'adoption', status: 'paid' });
-    return res.status(200).json({ donated: !!donation });
+    const paid = await Donation.findOne({ petId, userId: req.user._id, type: 'adoption', status: 'paid' });
+    if (paid) return res.status(200).json({ donated: true, paymentMethod: paid.paymentMethod });
+
+    // Thanh toán tiền mặt đang chờ duyệt → vẫn cho phép nộp đơn
+    const cashPending = await Donation.findOne({ petId, userId: req.user._id, type: 'adoption', paymentMethod: 'cash', status: 'pending' });
+    if (cashPending) return res.status(200).json({ donated: true, cashPending: true, paymentMethod: 'cash' });
+
+    return res.status(200).json({ donated: false });
   } catch (err) {
     console.error('[Donation] checkAdoptionDonation error:', err.message);
     return res.status(500).json({ message: 'Lỗi kiểm tra.' });

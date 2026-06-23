@@ -70,9 +70,12 @@ export const createAdoption = async (req, res) => {
       return res.status(400).json({ message: 'Bé thú cưng này đã được nhận nuôi thành công bởi một chủ nhân khác.' });
     }
 
-    // Kiểm tra donation bắt buộc
+    // Kiểm tra donation bắt buộc: cho phép đã paid hoặc đang chờ xác nhận tiền mặt
     if (pet.donationAmount > 0) {
-      const donation = await Donation.findOne({ petId, userId: req.user._id, type: 'adoption', status: 'paid' });
+      const donation = await Donation.findOne({
+        petId, userId: req.user._id, type: 'adoption',
+        $or: [{ status: 'paid' }, { status: 'pending', paymentMethod: 'cash' }],
+      });
       if (!donation) {
         return res.status(403).json({
           code: 'DONATION_REQUIRED',

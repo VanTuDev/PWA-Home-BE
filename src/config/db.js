@@ -1,4 +1,9 @@
 import mongoose from 'mongoose';
+import dns from 'dns';
+
+// Node.js đôi khi dùng 127.0.0.1 làm DNS (do WSL2/VPN) khiến SRV lookup thất bại.
+// Override sang DNS thực để mongodb+srv:// hoạt động bình thường.
+dns.setServers(['8.8.8.8', '8.8.4.4', '1.1.1.1']);
 
 const connectDB = async () => {
   try {
