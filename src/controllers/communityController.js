@@ -1,6 +1,8 @@
 import mongoose from 'mongoose';
 import Post from '../models/Post.js';
 import Adoption from '../models/Adoption.js';
+import Pet from '../models/Pet.js';
+import { createNotification } from './notificationController.js';
 
 const fileUrl = (f) => !f ? '' : f.path?.startsWith('http') ? f.path : `/uploads/${f.filename}`;
 
@@ -69,6 +71,18 @@ export const createPost = async (req, res) => {
             });
             await adoption.save();
             completedTask = { adoptionId: adoption.id, weekNumber: nextWeek };
+
+            const completedCount = adoption.trackingReports.length;
+            const pet = await Pet.findById(adoption.petId).select('name').lean();
+            await createNotification({
+              userId: u._id,
+              type: 'adoption',
+              title: `✅ Hoàn thành nhiệm vụ Tuần ${nextWeek}!`,
+              body: completedCount < 4
+                ? `Bạn đã đăng ảnh tuần ${nextWeek} cho bé ${pet?.name || 'thú cưng'}. Còn ${4 - completedCount} tuần nữa nhé!`
+                : `🎉 Xuất sắc! Bạn đã hoàn thành cả 4 tuần theo dõi cho bé ${pet?.name || 'thú cưng'}. Cảm ơn bạn!`,
+              link: '#missions',
+            });
           }
         }
       } catch (e) {

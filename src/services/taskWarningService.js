@@ -27,7 +27,7 @@ export const checkAndWarnOverdueTasks = async () => {
     for (const adoption of adoptions) {
       if (!adoption.userId) continue;
 
-      const approvedAt = adoption.updatedAt || adoption.submittedAt;
+      const approvedAt = adoption.approvedAt || adoption.updatedAt || adoption.submittedAt;
       const daysSince  = (Date.now() - new Date(approvedAt).getTime()) / DAY_MS;
       const expectedWeek = Math.min(4, Math.floor(daysSince / 7) + 1);
 
@@ -55,7 +55,7 @@ export const checkAndWarnOverdueTasks = async () => {
         type: 'system',
         title: `⚠️ Nhắc nhở nhiệm vụ tuần ${missingWeeks.join(', ')}`,
         body: `Bạn chưa cập nhật ảnh theo dõi cho tuần ${missingWeeks.join(', ')}. Hãy đăng bài có ảnh lên Cộng đồng để hoàn thành nhiệm vụ!`,
-        link: '/community',
+        link: '#missions',
       });
       warned++;
     }
@@ -78,7 +78,7 @@ export const getOverdueAdoptions = async () => {
 
   const result = [];
   for (const adoption of adoptions) {
-    const approvedAt   = adoption.updatedAt || adoption.submittedAt;
+    const approvedAt   = adoption.approvedAt || adoption.updatedAt || adoption.submittedAt;
     const daysSince    = (Date.now() - new Date(approvedAt).getTime()) / DAY_MS;
     const expectedWeek = Math.min(4, Math.floor(daysSince / 7) + 1);
     const doneWeeks    = new Set((adoption.trackingReports || []).map(r => r.weekNumber));

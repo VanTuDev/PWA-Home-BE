@@ -198,11 +198,24 @@ export const updateAdoptionStatus = async (req, res) => {
     const notifMap = {
       Approved: {
         title: '🎉 Đơn nhận nuôi được chấp nhận!',
-        body: `Chúc mừng! Đơn nhận nuôi bé ${petName} đã được phê duyệt. Nhiệm vụ 4 tuần chụp ảnh cập nhật đã bắt đầu — hãy vào mục Nhiệm vụ để hoàn thành nhé!`,
+        body: `Chúc mừng! Đơn nhận nuôi bé ${petName} đã được phê duyệt. Nhiệm vụ 4 tuần chụp ảnh cập nhật đã bắt đầu — nhấn vào đây để xem nhiệm vụ!`,
+        link: '#missions',
       },
-      Rejected: { title: '❌ Đơn nhận nuôi bị từ chối',    body: `Rất tiếc, đơn nhận nuôi bé ${petName} chưa được chấp thuận lần này.` },
-      FollowUp: { title: '🔍 Đơn nhận nuôi cần xem xét thêm', body: `Đơn nhận nuôi bé ${petName} đang được xem xét thêm.` },
-      Pending:  { title: '⏳ Đơn nhận nuôi đang chờ duyệt',   body: `Đơn nhận nuôi bé ${petName} đang được xử lý.` },
+      Rejected: {
+        title: '❌ Đơn nhận nuôi bị từ chối',
+        body: `Rất tiếc, đơn nhận nuôi bé ${petName} chưa được chấp thuận lần này.`,
+        link: '/history',
+      },
+      FollowUp: {
+        title: '🔍 Đơn nhận nuôi cần xem xét thêm',
+        body: `Đơn nhận nuôi bé ${petName} đang được xem xét thêm.`,
+        link: '/history',
+      },
+      Pending: {
+        title: '⏳ Đơn nhận nuôi đang chờ duyệt',
+        body: `Đơn nhận nuôi bé ${petName} đang được xử lý.`,
+        link: '/history',
+      },
     };
     const notif = notifMap[status];
     if (notif) {
@@ -211,7 +224,7 @@ export const updateAdoptionStatus = async (req, res) => {
         type: 'adoption',
         title: notif.title,
         body: notif.body,
-        link: '/history',
+        link: notif.link,
       });
     }
 
@@ -285,7 +298,7 @@ export const addTrackingReport = async (req, res) => {
       body: completedCount < 4
         ? `Tuyệt vời! Bạn đã nộp ảnh tuần ${weekNumber} cho bé ${pet?.name || 'thú cưng'}. Còn ${4 - completedCount} tuần nữa nhé!`
         : `🎉 Xuất sắc! Bạn đã hoàn thành cả 4 tuần theo dõi cho bé ${pet?.name || 'thú cưng'}. Cảm ơn bạn rất nhiều!`,
-      link: '/history',
+      link: '#missions',
     });
 
     return res.status(200).json({
