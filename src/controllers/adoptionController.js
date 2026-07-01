@@ -2,6 +2,7 @@ import Adoption from '../models/Adoption.js';
 import Pet from '../models/Pet.js';
 import Donation from '../models/Donation.js';
 import { createNotification } from './notificationController.js';
+import { getExpectedWeek } from '../utils/missionWeek.js';
 
 // @desc  GET /api/adoptions/my-tasks
 // @access Private (user)
@@ -12,8 +13,6 @@ export const getMyTasks = async (req, res) => {
       status: { $in: ['Approved', 'FollowUp'] }
     }).populate('petId', 'name image breed');
 
-    const DAY_MS = 24 * 60 * 60 * 1000;
-
     const tasks = adoptions.map(a => {
       const reports   = a.trackingReports || [];
       const doneWeeks = new Set(reports.map(r => r.weekNumber));
@@ -23,10 +22,10 @@ export const getMyTasks = async (req, res) => {
         report: reports.find(r => r.weekNumber === w) || null,
       }));
 
-      // Tính tuần hiện tại dựa vào approvedAt (ưu tiên) hoặc updatedAt
+      // Tính tuần hiện tại dựa vào approvedAt (ưu tiên) hoặc updatedAt — tuần nhiệm vụ
+      // luôn chuyển sang tuần mới đúng vào Thứ 2 theo lịch (xem utils/missionWeek.js)
       const baseDate  = a.approvedAt || a.updatedAt || a.submittedAt;
-      const daysSince = (Date.now() - new Date(baseDate).getTime()) / DAY_MS;
-      const expectedWeek = Math.min(4, Math.floor(daysSince / 7) + 1);
+      const expectedWeek = getExpectedWeek(baseDate);
 
       // Tuần đang hoạt động = tuần kỳ vọng chưa hoàn thành, tối thiểu tuần 1
       const currentWeek = Math.min(
@@ -255,10 +254,8 @@ export const addTrackingReport = async (req, res) => {
     }
 
     // Tự động tính tuần hiện tại từ approvedAt
-    const DAY_MS   = 24 * 60 * 60 * 1000;
     const baseDate = adoption.approvedAt || adoption.updatedAt || adoption.submittedAt;
-    const daysSince = (Date.now() - new Date(baseDate).getTime()) / DAY_MS;
-    const autoWeek  = Math.min(4, Math.floor(daysSince / 7) + 1);
+    const autoWeek = getExpectedWeek(baseDate);
 
     // weekNumber từ body (nếu có), không thì dùng tự động
     let weekNumber = req.body.weekNumber ? parseInt(req.body.weekNumber) : autoWeek;

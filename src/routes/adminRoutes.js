@@ -1,6 +1,7 @@
 import express from 'express';
 import {
   getDashboardStats,
+  getAnalyticsStats,
   getUsers,
   createUser,
   updateUser,
@@ -12,6 +13,9 @@ const router = express.Router();
 
 // Dashboard stats
 router.get('/dashboard', protect, authorize('admin', 'manager', 'staff'), getDashboardStats);
+
+// Analytics stats
+router.get('/analytics', protect, authorize('admin', 'manager', 'staff'), getAnalyticsStats);
 
 // User CRUD — admin only
 router.route('/users')

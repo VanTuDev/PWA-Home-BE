@@ -1,7 +1,8 @@
+import './loadEnv.js';
+
 import express from 'express';
 import http from 'http';
 import cors from 'cors';
-import dotenv from 'dotenv';
 import path from 'path';
 import fs from 'fs';
 
@@ -21,9 +22,8 @@ import adminRoutes from './routes/adminRoutes.js';
 import chatRoutes from './routes/chatRoutes.js';
 import notificationRoutes from './routes/notificationRoutes.js';
 import settingRoutes from './routes/settingRoutes.js';
+import logRoutes from './routes/logRoutes.js';
 import { startTaskWarningCron } from './services/taskWarningService.js';
-
-dotenv.config();
 
 // ─── CORS ────────────────────────────────────────────────────────────────────
 // FE_ORIGIN hỗ trợ nhiều domain cách nhau bằng dấu phẩy
@@ -146,6 +146,7 @@ const startServer = async () => {
   app.use('/api/chat', chatRoutes);
   app.use('/api/notifications', notificationRoutes);
   app.use('/api/settings', settingRoutes);
+  app.use('/api/logs', logRoutes);
 
   // Start cron jobs
   startTaskWarningCron();

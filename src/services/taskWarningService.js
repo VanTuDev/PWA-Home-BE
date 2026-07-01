@@ -1,21 +1,12 @@
 import cron from 'node-cron';
 import Adoption from '../models/Adoption.js';
 import { createNotification } from '../controllers/notificationController.js';
-
-const DAY_MS = 24 * 60 * 60 * 1000;
-
-/**
- * Tính tuần hiện tại kỳ vọng của adoption dựa trên ngày approve.
- * Mỗi tuần = 7 ngày. Tuần tối đa = 4.
- */
-export const getExpectedWeek = (approvedAt) => {
-  const daysSince = (Date.now() - new Date(approvedAt).getTime()) / DAY_MS;
-  return Math.min(4, Math.floor(daysSince / 7) + 1);
-};
+import { DAY_MS, getExpectedWeek, getDaysIntoCurrentWeek } from '../utils/missionWeek.js';
 
 /**
  * Kiểm tra tất cả adoption Approved/FollowUp và gửi cảnh báo cho
- * những user chưa nộp báo cáo đúng hạn (quá 3 ngày so với deadline tuần).
+ * những user chưa nộp báo cáo đúng hạn (quá 3 ngày so với deadline tuần,
+ * tức từ Thứ 5 của tuần nhiệm vụ hiện tại trở đi).
  */
 export const checkAndWarnOverdueTasks = async () => {
   try {
@@ -28,14 +19,13 @@ export const checkAndWarnOverdueTasks = async () => {
       if (!adoption.userId) continue;
 
       const approvedAt = adoption.approvedAt || adoption.updatedAt || adoption.submittedAt;
-      const daysSince  = (Date.now() - new Date(approvedAt).getTime()) / DAY_MS;
-      const expectedWeek = Math.min(4, Math.floor(daysSince / 7) + 1);
+      const expectedWeek = getExpectedWeek(approvedAt);
 
       const doneWeeks = new Set((adoption.trackingReports || []).map(r => r.weekNumber));
       const completedCount = doneWeeks.size;
 
       // Quá hạn nếu completedCount < expectedWeek và đã qua deadline tuần hiện tại >= 3 ngày
-      const daysIntoCurrentWeek = daysSince - (expectedWeek - 1) * 7;
+      const daysIntoCurrentWeek = getDaysIntoCurrentWeek(approvedAt, expectedWeek);
       const isOverdue = completedCount < expectedWeek && daysIntoCurrentWeek >= 3;
 
       if (!isOverdue) continue;
@@ -80,10 +70,10 @@ export const getOverdueAdoptions = async () => {
   for (const adoption of adoptions) {
     const approvedAt   = adoption.approvedAt || adoption.updatedAt || adoption.submittedAt;
     const daysSince    = (Date.now() - new Date(approvedAt).getTime()) / DAY_MS;
-    const expectedWeek = Math.min(4, Math.floor(daysSince / 7) + 1);
+    const expectedWeek = getExpectedWeek(approvedAt);
     const doneWeeks    = new Set((adoption.trackingReports || []).map(r => r.weekNumber));
     const completedCount = doneWeeks.size;
-    const daysIntoCurrentWeek = daysSince - (expectedWeek - 1) * 7;
+    const daysIntoCurrentWeek = getDaysIntoCurrentWeek(approvedAt, expectedWeek);
     const isOverdue    = completedCount < expectedWeek && daysIntoCurrentWeek >= 3;
 
     if (!isOverdue) continue;
